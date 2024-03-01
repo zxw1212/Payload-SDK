@@ -2292,6 +2292,7 @@ static T_DjiReturnCode DjiTest_CameraManagerMediaDownloadFileListBySlices(E_DjiM
     T_DjiCameraManagerSliceConfig sliceConfig = {0};
 
     s_nextDownloadFileIndex = 0;
+    // 会对s_meidaFileList中的文件路径做数据下载
     returnCode = DjiCameraManager_RegDownloadFileDataCallback(position, DjiTest_CameraManagerDownloadFileDataCallback);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Register download file data callback failed, error code: 0x%08X.", returnCode);
@@ -2306,6 +2307,7 @@ static T_DjiReturnCode DjiTest_CameraManagerMediaDownloadFileListBySlices(E_DjiM
     sliceConfig.countPerSlice = DJI_CAMERA_MANAGER_FILE_LIST_COUNT_ALL_PER_SLICE;
     sliceConfig.sliceStartIndex = 0;
 
+    // 会对s_meidaFileList做赋值，其中的s_meidaFileList.fileListInfo[i].fileName表示文件路径,因为它被fopen调用
     returnCode = DjiCameraManager_DownloadFileListBySlices(position, sliceConfig, &s_meidaFileList);
     if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
         USER_LOG_ERROR("Download file list failed, error code: 0x%08X.", returnCode);
@@ -2348,6 +2350,7 @@ static T_DjiReturnCode DjiTest_CameraManagerMediaDownloadFileListBySlices(E_DjiM
         }
         printf("\r\n");
 
+        // 会触发回调函数DjiTest_CameraManagerDownloadFileDataCallback中的下载操作,可以配合命令行实现文件拷贝，以适配文件路径
         returnCode = DjiCameraManager_DownloadFileByIndex(position, s_meidaFileList.fileListInfo[0].fileIndex);
         if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
             USER_LOG_ERROR("Download media file by index failed, error code: 0x%08X.", returnCode);
