@@ -14,8 +14,9 @@ add_definitions(-D_GNU_SOURCE)
 # find_package(Freetype REQUIRED)
 # include_directories(/usr/include/freetype2/)
 
-# #find_package(Jsoncpp REQUIRED)
-# include_directories(/usr/include/jsoncpp/)
+#find_package(Jsoncpp REQUIRED)
+find_package(jsoncpp CONFIG REQUIRED)
+include_directories(/usr/include/jsoncpp/)
 
 # include_directories(/home/rer/mybin2/)
 ############################## csg ######################################
@@ -158,4 +159,7 @@ endif ()
 #   paho-mqttpp3
 #   mybamb
 # )
+target_link_libraries(${PROJECT_NAME}
+  jsoncpp_lib
+)
 ############################## csg ######################################

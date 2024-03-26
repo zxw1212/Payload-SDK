@@ -12,6 +12,10 @@
 #include "dji_logger.h"
 #include "dji_platform.h"
 
+// RTK can be detected as unavailable only for Flight controllers that don't
+// support RTK
+bool rtkAvailable = true;
+
 void* DjiUser_ModuleInitAndSubscribeTopics(void* arg) {
   T_DjiReturnCode returnCode;
 
@@ -518,6 +522,7 @@ T_DjiFcSubscriptionRtkPosition DjiUser_FlightControlGetValueOfRtkPosition() {
   if (djiStat != DjiErrorCode::DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Get value of topic RtkPosition error, error code: 0x%08X",
                    djiStat);
+    rtkAvailable = false;
   }
 
   return rtk;
@@ -538,6 +543,7 @@ DjiUser_FlightControlGetValueOfRtkPositionInfo() {
     USER_LOG_ERROR(
         "Get value of topic RtkPositionInfo error, error code: 0x%08X",
         djiStat);
+    rtkAvailable = false;
   }
 
   return rtk_info;
@@ -556,6 +562,7 @@ T_DjiFcSubscriptionRtkVelocity DjiUser_FlightControlGetValueOfRtkVelocity() {
   if (djiStat != DjiErrorCode::DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Get value of topic RtkVelocity error, error code: 0x%08X",
                    djiStat);
+    rtkAvailable = false;
   }
 
   return rtk_velocity;
@@ -573,6 +580,7 @@ T_DjiFcSubscriptionRtkYaw DjiUser_FlightControlGetValueOfRtkYaw() {
   if (djiStat != DjiErrorCode::DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Get value of topic RtkYaw error, error code: 0x%08X",
                    djiStat);
+    rtkAvailable = false;
   }
 
   return rtk_yaw;
@@ -591,6 +599,7 @@ T_DjiFcSubscriptionRtkYawInfo DjiUser_FlightControlGetValueOfRtkYawInfo() {
   if (djiStat != DjiErrorCode::DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Get value of topic RtkYawInfo error, error code: 0x%08X",
                    djiStat);
+    rtkAvailable = false;
   }
 
   return rtk_yaw_info;
@@ -611,6 +620,7 @@ DjiUser_FlightControlGetValueOfRTKConnectStatus() {
     USER_LOG_ERROR(
         "Get value of topic RTKConnectStatus error, error code: 0x%08X",
         djiStat);
+    rtkAvailable = false;
   }
 
   return rtk_connect_status;
@@ -773,6 +783,41 @@ DjiUser_FlightControlGetValueOfCollisionAvoidance(
           return collision_avoid_enable_status;
       }
   }
+}
+
+std::string displayModeToString(const int displayMode) {
+  std::string displayModeStr;
+  switch (displayMode) {
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_MANUAL_CTRL:
+      displayModeStr = "MANUAL";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_ATTITUDE:
+      displayModeStr = "ATTI";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_P_GPS:
+      displayModeStr = "GPS_SPORT";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_HOTPOINT_MODE:
+      displayModeStr = "GPS_WAYPOINT";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_TAKEOFF:
+      displayModeStr = "AUTO_TAKEOFF";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_AUTO_LANDING:
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_FORCE_AUTO_LANDING:
+      displayModeStr = "AUTO_LANDING";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_NAVI_GO_HOME:
+      displayModeStr = "GO_HOME";
+      break;
+    case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_NAVI_SDK_CTRL:
+      displayModeStr = "JOYSTICK";  // TODO{zengxw} ??SDK means joystick?
+      break;
+    default:
+      displayModeStr = "UNKNOWN";
+      break;
+  }
+  return displayModeStr;
 }
 
 T_DjiVector3f quaternionToEulerAngle(

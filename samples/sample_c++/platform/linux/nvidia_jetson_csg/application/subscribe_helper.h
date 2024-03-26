@@ -60,6 +60,7 @@ E_DjiFlightControllerObstacleAvoidanceEnableStatus
 DjiUser_FlightControlGetValueOfCollisionAvoidance(
     COLLISION_AVOIDANCE_DIRECTION direction, COLLISION_AVOIDANCE_TYPE type);
 
+std::string displayModeToString(const int displayMode);
 T_DjiVector3f quaternionToEulerAngle(const T_DjiFcSubscriptionQuaternion& quat);
 std::string getFlightAnomaly(
     const T_DjiFcSubscriptionFlightAnomaly& flyAnomaly);
