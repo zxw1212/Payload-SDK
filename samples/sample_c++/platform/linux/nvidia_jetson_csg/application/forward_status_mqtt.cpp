@@ -18,7 +18,7 @@
  * variables in pub()
  */
 namespace {
-constexpr bool kPrintSubscribedMessage = true;
+constexpr bool kPrintSubscribedMessage = false;
 }
 
 constexpr double DEG2RAD = 0.01745329252;

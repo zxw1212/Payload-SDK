@@ -28,7 +28,6 @@ void* DjiUser_ModuleInitAndSubscribeTopics(void* arg) {
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Init flight controller module failed, error code:0x%08llX",
                    returnCode);
-    return NULL;
   }
 
   returnCode = DjiCameraManager_Init();
@@ -47,7 +46,6 @@ void* DjiUser_ModuleInitAndSubscribeTopics(void* arg) {
   if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
     USER_LOG_ERROR("Init data subscription module failed, error code:0x%08llX",
                    returnCode);
-    return NULL;
   }
 
   std::vector<E_DjiFcSubscriptionTopic> topic_list{
