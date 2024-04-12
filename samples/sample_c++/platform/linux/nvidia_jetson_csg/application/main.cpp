@@ -1,8 +1,13 @@
 #include <stdio.h>
-
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
+#include <chrono>
+
+#include <json/json.h>
+#include "mqtt/async_client.h"
+#include "mqtt/topic.h"
 
 #include "application.hpp"
 #include "dji_logger.h"
@@ -10,6 +15,25 @@
 #include "forward_status_mqtt.h"
 #include "consume_command_mqtt.h"
 #include "subscribe_helper.h"
+
+namespace {
+#define EnableMQTT
+}
+
+// mqtt client and topics
+mqtt::topic* topic_cb;
+mqtt::async_client* cli;
+std::string s_CLIENT_ID;
+std::string s_RTMP_URI;
+std::string s_HTTP_URI;
+std::string s_TOPIC_MISSION;
+std::string s_TOPIC_GENERAL;
+std::string s_TOPIC_RC;
+std::string s_TOPIC_CAMERA;
+std::string s_TOPIC_V3;
+std::string s_TOPIC_FAN;
+constexpr int kQOS = 1;
+constexpr int kMAX_BUFFERED_MESSAGES = 1200;
 
 // some flag
 int i_Mode = 0;
@@ -28,6 +52,94 @@ T_DjiTaskHandle s_consumeUserCommandTaskHandle;
 #define DJI_TEST_CONSUME_USER_COMMAND_TASK_STACK_SIZE 2048
 
 int main(int argc, char** argv) {
+
+#ifdef EnableMQTT
+  // setup param of MQTT
+  std::ifstream ifs2;
+  ifs2.open("/sys/firmware/devicetree/base/serial-number", ios::in);
+  if (!ifs2.is_open()) {
+    std::cout << "open file /sys/firmware/devicetree/base/serial-number error!"
+              << std::endl;
+    return -1;
+  }
+  char cpuid[128];
+  memset(cpuid, 0, 128);
+  while (ifs2 >> cpuid) {
+    std::cout << "cpu id is: " << cpuid << std::endl;
+  }
+  std::ifstream ifs;
+  ifs.open("/home/rer/mybin/bin/config.json");
+  if (!ifs.is_open()) {
+    std::cout << "open file /home/rer/mybin/bin/config.json error!"
+              << std::endl;
+    return -1;
+  }
+  Json::Reader reader;
+  Json::Value root;
+  if (!reader.parse(ifs, root, false)) {
+    std::cout << "parse json file error!" << std::endl;
+    return -1;
+  }
+  std::string mqtt_url = root["mqtt_url"].asString();
+  std::string mqtt_username = root["mqtt_username"].asString();
+  std::string mqtt_passwd = root["mqtt_passwd"].asString();
+  s_CLIENT_ID = cpuid;
+  s_CLIENT_ID = "/" + s_CLIENT_ID;
+  s_CLIENT_ID = "/dongguan-sai-001";
+  s_RTMP_URI = root["rtmp_url"].asString();
+  s_HTTP_URI = root["http_url"].asString();
+  i_Mode = root["MODE"].asInt();
+  std::cout << "s_CLIENT_ID: " << s_CLIENT_ID << ", s_RTMP_URI: " << s_RTMP_URI
+            << std::endl;
+  s_TOPIC_MISSION = s_CLIENT_ID + "/sys/mission";
+  s_TOPIC_GENERAL = s_CLIENT_ID + "/sys/general";
+  s_TOPIC_RC = s_CLIENT_ID + "/sys/rc";
+  s_TOPIC_CAMERA = s_CLIENT_ID + "/sys/camera";
+  s_TOPIC_V3 = s_CLIENT_ID + "/v3/sys/general";
+  s_TOPIC_FAN = s_CLIENT_ID + "/sys/fanBase";
+  std::string s_TOPIC_CB = s_CLIENT_ID + "/callback";
+
+  // setup MQTTT
+  auto createOpts = mqtt::create_options_builder()
+                        .send_while_disconnected(true, true)
+                        .max_buffered_messages(kMAX_BUFFERED_MESSAGES)
+                        .delete_oldest_messages()
+                        .finalize();
+  mqtt::async_client client(mqtt_url, s_CLIENT_ID, createOpts);
+  cli = &client;
+  cli->set_connected_handler([&client](const string&) {
+    std::cout << "*** MQTT Connected ***" << std::endl;
+  });
+  cli->set_connection_lost_handler([&client](const string&) {
+    std::cout << "*** MQTT Connection Lost ***" << std::endl;
+  });
+  auto willMsg =
+      mqtt::message("/events", "Time publisher disconnected", 1, true);
+  auto connOpts = mqtt::connect_options_builder()
+                      .user_name("dkyuser")
+                      .password("Ycjc@dky1409")
+                      .clean_session()
+                      .will(willMsg)
+                      .automatic_reconnect(std::chrono::seconds(1), std::chrono::seconds(10))
+                      .finalize();
+  auto topic_callback = mqtt::topic(*cli, s_TOPIC_CB, kQOS);
+  topic_cb = &topic_callback;
+
+  // subscribe mqtt topic
+  cli->start_consuming();
+  std::cout << s_TOPIC_MISSION << std::endl;
+  auto tok = cli->connect(connOpts);
+  auto rsp = tok->get_connect_response();
+  if (!rsp.is_session_present()) {
+    cli->subscribe(s_TOPIC_MISSION, kQOS)->wait();
+    cli->subscribe(s_TOPIC_GENERAL, kQOS)->wait();
+    cli->subscribe(s_TOPIC_RC, kQOS)->wait();
+    cli->subscribe(s_TOPIC_CAMERA, kQOS)->wait();
+    cli->subscribe(s_TOPIC_V3, kQOS)->wait();
+    cli->subscribe(s_TOPIC_FAN, kQOS)->wait();
+  }
+#endif
+
   Application application(argc, argv);
   // start more thread tasks
   T_DjiReturnCode returnCode;

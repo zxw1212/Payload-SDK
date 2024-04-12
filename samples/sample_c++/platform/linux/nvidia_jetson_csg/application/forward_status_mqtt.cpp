@@ -1,7 +1,5 @@
 #include "forward_status_mqtt.h"
 
-#include <stdio.h>
-
 #include <cmath>
 #include <exception>
 #include <fstream>
@@ -11,31 +9,29 @@
 #include "dji_flight_controller.h"
 #include "dji_logger.h"
 #include "subscribe_helper.h"
-#include <json/json.h>
 
-/**
- * @brief search 'publish' to enable mqtt publisher, and uncomment some
- * variables in pub()
- */
+#include <json/json.h>
+#include "mqtt/async_client.h"
+#include "mqtt/topic.h"
+
 namespace {
-constexpr bool kPrintSubscribedMessage = false;
+#define EnableMQTT
 }
 
 constexpr double DEG2RAD = 0.01745329252;
 
 // The QoS for sending data
-// constexpr int kNum_QOS = 1;
+constexpr int kNum_QOS = 1;
 // Forwarding frequence
 constexpr int waitTimeMs = 1000;
 Json::Value jv_waypoint;
-Json::StyledWriter writer;
 
 extern std::string modeFly;
-// extern int i_CAMERA_MODE;
+extern int i_CAMERA_MODE;
 extern bool kSubscriptionStart;
-// extern std::string s_CLIENT_ID;
+extern std::string s_CLIENT_ID;
 extern bool rtkAvailable;
-// extern mqtt::async_client* cli;
+extern mqtt::async_client* cli;
 // --------------------------------------------------------------------------
 void* ForwardStatusMqtt_Task(void* arg) {
   T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
@@ -105,20 +101,22 @@ void* ForwardStatusMqtt_Task(void* arg) {
   int elapsedTimeInSecond = 0;
 
   try {
-    // auto top_base = mqtt::topic(*cli, s_CLIENT_ID + "/status/base",
-    // kNum_QOS); auto top_aircraft =
-    //     mqtt::topic(*cli, s_CLIENT_ID + "/status/aircraft", kNum_QOS);
-    // auto top_rtk = mqtt::topic(*cli, s_CLIENT_ID + "/status/rtk", kNum_QOS);
-    // auto top_battery =
-    //     mqtt::topic(*cli, s_CLIENT_ID + "/status/aircraft_battery",
-    //     kNum_QOS);
-    // auto top_gimbal = mqtt::topic(*cli, s_CLIENT_ID + "/status/gimbal",
-    // kNum_QOS); auto top_waypoint =
-    //     mqtt::topic(*cli, s_CLIENT_ID + "/status/waypoint", kNum_QOS);
-    // auto top_camera =
-    //     mqtt::topic(*cli, s_CLIENT_ID + "/v3/status/camera", kNum_QOS);
-    // auto top_avoid =
-    //     mqtt::topic(*cli, s_CLIENT_ID + "/v3/status/avoidSystem", kNum_QOS);
+    auto top_base = mqtt::topic(*cli, s_CLIENT_ID + "/status/base",
+    kNum_QOS);
+    auto top_aircraft =
+        mqtt::topic(*cli, s_CLIENT_ID + "/status/aircraft", kNum_QOS);
+    auto top_rtk = mqtt::topic(*cli, s_CLIENT_ID + "/status/rtk", kNum_QOS);
+    auto top_battery =
+        mqtt::topic(*cli, s_CLIENT_ID + "/status/aircraft_battery",
+        kNum_QOS);
+    auto top_gimbal = mqtt::topic(*cli, s_CLIENT_ID + "/status/gimbal",
+    kNum_QOS);
+    auto top_waypoint =
+        mqtt::topic(*cli, s_CLIENT_ID + "/status/waypoint", kNum_QOS);
+    auto top_camera =
+        mqtt::topic(*cli, s_CLIENT_ID + "/v3/status/camera", kNum_QOS);
+    auto top_avoid =
+        mqtt::topic(*cli, s_CLIENT_ID + "/v3/status/avoidSystem", kNum_QOS);
 
     while (true) {
       if (!kSubscriptionStart) {
@@ -184,10 +182,6 @@ void* ForwardStatusMqtt_Task(void* arg) {
       jv_base["nestLocationLatitude"] = 0.0;
       jv_base["nestLocationLongitude"] = 0.0;
       jv_base["nestControllerState"] = 1;  // 机库控制端是否在线
-      //   top_base.publish(jv_base.toStyledString());
-      if (kPrintSubscribedMessage) {
-        std::cout << writer.write(jv_base) << std::endl;
-      }
 
       // 5.3.2 [/status/aircraft]
       Json::Value jv_aircraft;
@@ -229,8 +223,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
           std::to_string(positionFused.visibleSatelliteNumber);
       jv_aircraft["areMotorsOn"] = (areMotorsOn ? "false" : "true");
       jv_aircraft["diagnostics"] = getFlightAnomaly(flyAnomaly);
-      jv_aircraft["aircraftUltrasonicHeightInMeters"] =
-          std::to_string(ultrasonicHeight);  // TODO{ZENGXW}
+      jv_aircraft["aircraftUltrasonicHeightInMeters"] = std::to_string(ultrasonicHeight);
       // TODO jv_aircraft["isLiveStreaming"] = std::to_string(0);
       // TODO jv_aircraft["liveStreamInfo"] = std::to_string(0);
       if (homePointInfo.longitude > -3.2 && homePointInfo.longitude < 3.2) {
@@ -242,15 +235,10 @@ void* ForwardStatusMqtt_Task(void* arg) {
             getDistanceByRad(positionFused.latitude, positionFused.longitude,
                              homePointInfo.latitude, homePointInfo.longitude));
       }
-      //   top_aircraft.publish(jv_aircraft.toStyledstd::string());
-      if (kPrintSubscribedMessage) {
-        std::cout << writer.write(jv_aircraft) << std::endl;
-      }
 
       // 5.3.3 [/status/rtk]
-#if 1
+      Json::Value jv_rtk;
       if (rtkAvailable) {
-        Json::Value jv_rtk;
         jv_rtk["aircraftRtkAltitude"] = std::to_string(rtk.hfsl);
         jv_rtk["aircraftRtkLatitude"] = std::to_string(rtk.latitude);
         jv_rtk["aircraftRtkLongitude"] = std::to_string(rtk.longitude);
@@ -270,16 +258,11 @@ void* ForwardStatusMqtt_Task(void* arg) {
             getPositionSolutionString(rtk_posi_info);
         // TODO  jv_rtk["takeOffAltitude"] = std::to_string(0);
         // TODO  jv_rtk["networkChannelMsg"] = std::to_string(0);
-        // top_rtk.publish(jv_rtk.toStyledString());
-        if (kPrintSubscribedMessage) {
-          std::cout << writer.write(jv_rtk) << std::endl;
-        }
       }
-#endif
 
       // 5.3.4 [/status/aircraft_battery]
+      Json::Value jv_battery;
       if (countSecond++ % 2 == 0) {
-        Json::Value jv_battery;
         singleBatteryInfo1 = DjiUser_FlightControlGetValueOfBattery1();
         singleBatteryInfo2 = DjiUser_FlightControlGetValueOfBattery2();
         // TODO{zengxw} is singleBatteryInfo2 not need?
@@ -296,8 +279,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
         jv_battery["isCellDamaged"] =
             (singleBatteryInfo1.batteryState.cellBreak ? "true" : "false");
         jv_battery["isLowCellVoltageDetected"] = true;
-        jv_battery["batterySerailNo"] = "SN001";
-        // top_battery.publish(jv_battery.toStyledString());
+        jv_battery["batterySerailNo"] = "SN001";   
       }
 
       // 5.3.6 [/status/gimbal]
@@ -305,10 +287,8 @@ void* ForwardStatusMqtt_Task(void* arg) {
       jv_gimbal["gimbalPitch"] = std::to_string(gimbalAngles.x);
       jv_gimbal["gimbalYaw"] = std::to_string(gimbalAngles.z);
       jv_gimbal["gimbalRoll"] = std::to_string(gimbalAngles.y);
-      //   top_gimbal.publish(jv_gimbal.toStyledString());
 
       // 5.3.7 [/status/waypoint]
-      //   top_waypoint.publish(jv_waypoint.toStyledString());
 
       // 5.3.13 [/v3/status/camera]
       Json::Value jv_camera;
@@ -317,8 +297,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
       E_DjiCameraType camera_type = DjiUser_FlightControlGetValueOfCameraType(
           E_DjiMountPosition::DJI_MOUNT_POSITION_PAYLOAD_PORT_NO1);
       jv_camera["cameraType"] = cameraTypeEnumToString(camera_type);
-      //   jv_camera["cameraMode"] = std::to_string(i_CAMERA_MODE);
-      //   top_camera.publish(jv_camera.toStyledString());
+      // jv_camera["cameraMode"] = std::to_string(i_CAMERA_MODE);
 
       // 5.3.14 [/v3/status/avoidSystem]
       Json::Value jv_avoid;
@@ -352,8 +331,17 @@ void* ForwardStatusMqtt_Task(void* arg) {
           DjiUser_FlightControlGetValueOfAircraftBaseInfo();
       jv_avoid["aircraftType"] = base_info.aircraftType;
       jv_avoid["avoidSwitch"] = std::to_string(avoid_status);
-      //   top_avoid.publish(jv_avoid.toStyledString());
 
+#ifdef EnableMQTT
+      top_base.publish(jv_base.toStyledString());
+      top_aircraft.publish(jv_aircraft.toStyledString());
+      if (rtkAvailable) top_rtk.publish(jv_rtk.toStyledString());
+      if ((countSecond - 1) % 2 == 0) top_battery.publish(jv_battery.toStyledString());
+      top_gimbal.publish(jv_gimbal.toStyledString());
+      top_waypoint.publish(jv_waypoint.toStyledString());
+      top_camera.publish(jv_camera.toStyledString());
+      top_avoid.publish(jv_avoid.toStyledString());
+#endif
       osalHandler->TaskSleepMs(waitTimeMs);
     }
   } catch (std::exception& e) {

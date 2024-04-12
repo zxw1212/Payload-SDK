@@ -25,7 +25,7 @@
 #include "mqtt/async_client.h"
 #include "mqtt/topic.h"
 
-#include "windsp.h"
+// #include "windsp.h"
 
 /**
  * @brief search "msg" "temporary comment" and "publish" "pa".
@@ -57,15 +57,15 @@ extern int i_CAMERA_MODE;
 extern bool bool_RTMPFlag;
 extern int i_Mode;
 
-extern std::string s_CLIENT_ID;
-extern std::string s_RTMP_URI;
-extern std::string s_HTTP_URI;
-extern std::string s_TOPIC_MISSION;
-extern std::string s_TOPIC_GENERAL;
-extern std::string s_TOPIC_RC;
-extern std::string s_TOPIC_CAMERA;
-extern std::string s_TOPIC_V3;
-extern std::string s_TOPIC_FAN;
+// extern std::string s_CLIENT_ID;
+// extern std::string s_RTMP_URI;
+// extern std::string s_HTTP_URI;
+// extern std::string s_TOPIC_MISSION;
+// extern std::string s_TOPIC_GENERAL;
+// extern std::string s_TOPIC_RC;
+// extern std::string s_TOPIC_CAMERA;
+// extern std::string s_TOPIC_V3;
+// extern std::string s_TOPIC_FAN;
 
 int fanStep = 0;
 int fileNum = 0;
@@ -653,7 +653,7 @@ void UpdateStatus(std::string pCode)
 	}
 
 	std::cout << "UpdateStatus " << jo.toStyledString() << std::endl;
-	topic_cb->publish(jo.toStyledString());
+	// topic_cb->publish(jo.toStyledString());
 }
 
 void executeCMD(const char* cmd /*shell command*/, char* result)
@@ -1139,6 +1139,11 @@ void* ConsumeUserCommand_Task(void* arg)
 
 	try
 	{
+		// hard code test
+		iCode = 99012; // take_off
+		now_t = std::time(NULL);
+		int start_time = (int)now_t;
+		bool run_once = true;
 		while (true)
 		{
 			now_t = std::time(NULL);
@@ -1146,68 +1151,86 @@ void* ConsumeUserCommand_Task(void* arg)
 			jsonValue_cb.clear();
 			jsonValue_cb["date"] = (int)now_t;
 
-			auto msg = cli->consume_message();
-			if (!msg)
-			{
-				break;
+			if((((int)now_t - start_time) > 10) && (iCode == 99012)){
+				std::cout << "=============================change task to MISSION UPLOAD===============================" << std::endl;
+				iCode = 10003; // MISSION UPLOAD
+				run_once = true;
 			}
-			if (!(reader.parse(msg->to_string(), jsonValue_msg)))
-			{
-				jsonValue_cb["pCode"] = "UNKNOWN";
-				jsonValue_cb["code"] = callback_json_error;
-				jsonValue_cb["msg"] = "json parse error";
+			if((((int)now_t - start_time) > 15) && (iCode == 10003)){
+				std::cout << "=============================change task to MISSION START===============================" << std::endl;
+				iCode = 10006; // MISSION START
+				run_once = true;
 			}
-			else
+
+			// auto msg = cli->consume_message();
+			// if (!msg)
+			// {
+			// 	break;
+			// }
+			// if (!(reader.parse(msg->to_string(), jsonValue_msg)))
+			// {
+			// 	jsonValue_cb["pCode"] = "UNKNOWN";
+			// 	jsonValue_cb["code"] = callback_json_error;
+			// 	jsonValue_cb["msg"] = "json parse error";
+			// }
+			// else
 			{
-
-				if (!(jsonValue_msg.isMember("code") && jsonValue_msg["code"].isString()))
+				// if (!(jsonValue_msg.isMember("code") && jsonValue_msg["code"].isString()))
+				// {
+				// 	jsonValue_cb["pCode"] = "UNKNOWN";
+				// 	jsonValue_cb["code"] = callback_param_error;
+				// 	jsonValue_cb["msg"] = "param error without code";
+				// }
+				// else
 				{
-					jsonValue_cb["pCode"] = "UNKNOWN";
-					jsonValue_cb["code"] = callback_param_error;
-					jsonValue_cb["msg"] = "param error without code";
-				}
-				else
-				{
-					sCode = jsonValue_msg["code"].asString();
-					printf("code is %s\r\n", sCode.c_str());
+					// sCode = jsonValue_msg["code"].asString();
+					// printf("code is %s\r\n", sCode.c_str());
 
-					jsonValue_cb["pCode"] = sCode;
-					iCode = std::stoi(sCode);
+					// jsonValue_cb["pCode"] = sCode;
+					// iCode = std::stoi(sCode);
 
-					if (msg->get_topic() == s_TOPIC_MISSION)
+					// if (msg->get_topic() == s_TOPIC_MISSION)
+					if (run_once && (iCode == 10003/*upload*/ || iCode == 10006/*start*/))
 					{
+						run_once = false;
 						// Mission task
 						MQTT_Mission();
 					}
-					else if (msg->get_topic() == s_TOPIC_CAMERA)
+					// else if (msg->get_topic() == s_TOPIC_CAMERA)
+					else if (0)
 					{
 						// Camera task
 						MQTT_Camera();
 					}
-					else if (msg->get_topic() == s_TOPIC_GENERAL)
+					// else if (msg->get_topic() == s_TOPIC_GENERAL)
+					else if (0)
 					{
 						// General task
 						MQTT_Gen();
 					}
-					else if (msg->get_topic() == s_TOPIC_V3)
+					// else if (msg->get_topic() == s_TOPIC_V3)
+					else if (0)
 					{
 						// ... 
 						MQTT_V3();
 					}
-					else if (msg->get_topic() == s_TOPIC_RC)
+					// else if (msg->get_topic() == s_TOPIC_RC)
+					else if (run_once && iCode == 99012/*take off*/)
 					{
+						run_once = false;
 						// Remote control task
 						MQTT_RC();
 					}
-					else if (msg->get_topic() == s_TOPIC_FAN)
+					// else if (msg->get_topic() == s_TOPIC_FAN)
+					else if (0)
 					{
 						// Fan task
 						MQTT_FAN();
 					}
 				}
 			}
-			std::cout << msg->get_topic() << ": " << msg->to_string() << std::endl;
-			topic_cb->publish(jsonValue_cb.toStyledString());
+			// std::cout << msg->get_topic() << ": " << msg->to_string() << std::endl;
+			// topic_cb->publish(jsonValue_cb.toStyledString());
 		}
 
 	}
@@ -1925,39 +1948,40 @@ void TaskFan()
 		return;
 	}
 
+	// TODO{zengxw} Seems lack of file.
 	/*******************************temporary comment*********************************/
-	struct ParametersWind pa;
+	// struct ParametersWind pa;
 
-	pa.pianhang = fd.yaw;
-	pa.jiangye = 50.53;
-	pa.tagaoH = fd.towerHeight;
-	pa.jiangyeR = fd.bladeLen;
+	// pa.pianhang = fd.yaw;
+	// pa.jiangye = 50.53;
+	// pa.tagaoH = fd.towerHeight;
+	// pa.jiangyeR = fd.bladeLen;
 
-	pa.startingPoint[0] = fd.cenLat;
-	pa.startingPoint[1] = fd.cenLon;
-	pa.startingPoint[2] = fd.cenAlt;
+	// pa.startingPoint[0] = fd.cenLat;
+	// pa.startingPoint[1] = fd.cenLon;
+	// pa.startingPoint[2] = fd.cenAlt;
 
-	pa.shootS0 = fd.distanceForCheck;
-	pa.shootS = fd.distanceForWork;
-	pa.shootD = fd.relativeAlt;
-	pa.shootMidu = fd.shootThickness;
+	// pa.shootS0 = fd.distanceForCheck;
+	// pa.shootS = fd.distanceForWork;
+	// pa.shootD = fd.relativeAlt;
+	// pa.shootMidu = fd.shootThickness;
 
-	printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
-	printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
-	printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
+	// printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
+	// printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
+	// printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
 
-	PointWork pw;
+	// PointWork pw;
 
-	int res = model_emulat(pa, &pw);
+	// int res = model_emulat(pa, &pw);
 
-	printf("res :%d\r\n", res);
-	printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
-	printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
-	for (int i = 0; i < res; i++)
-	{
-		printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
-	}
-	printf("printLocation task start %s\r\n", fd.missionID.c_str());
+	// printf("res :%d\r\n", res);
+	// printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
+	// printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
+	// for (int i = 0; i < res; i++)
+	// {
+	// 	printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
+	// }
+	// printf("printLocation task start %s\r\n", fd.missionID.c_str());
 	/*******************************temporary comment*********************************/
 
 
@@ -1985,17 +2009,17 @@ void TaskFan()
 		memset(buf, 0, 256);
 	/*******************************temporary comment*********************************/
 
-		sprintf(buf, "%f,%f,1", pw.start[i].e, pw.start[i].f);
+		// sprintf(buf, "%f,%f,1", pw.start[i].e, pw.start[i].f);
 
-		missonTasks[i].wayPointAction = "4,5,1";
-		missonTasks[i].wayPointActionParam = buf;
-		missonTasks[i].shootPhotoDistanceInterval = 0.0;
-		missonTasks[i].shootPhotoTimeInterval = 0.0;
-		missonTasks[i].wayPointSpeed = 4.0;
-		missonTasks[i].wayPointAltitude = pw.start[i].alt;
-		missonTasks[i].wayPointLongitude = pw.start[i].lng;;
-		missonTasks[i].wayPointLatitude = pw.start[i].lat;
-		printf("get lat %.14lf %.14lf\r\n", missonTasks[i].wayPointLatitude, missonTasks[i].wayPointLongitude);
+		// missonTasks[i].wayPointAction = "4,5,1";
+		// missonTasks[i].wayPointActionParam = buf;
+		// missonTasks[i].shootPhotoDistanceInterval = 0.0;
+		// missonTasks[i].shootPhotoTimeInterval = 0.0;
+		// missonTasks[i].wayPointSpeed = 4.0;
+		// missonTasks[i].wayPointAltitude = pw.start[i].alt;
+		// missonTasks[i].wayPointLongitude = pw.start[i].lng;;
+		// missonTasks[i].wayPointLatitude = pw.start[i].lat;
+		// printf("get lat %.14lf %.14lf\r\n", missonTasks[i].wayPointLatitude, missonTasks[i].wayPointLongitude);
 	/*******************************temporary comment*********************************/
 
 	}
@@ -2068,7 +2092,7 @@ void TaskFan()
 // waypoint task according to photo
 void TaskFan2(const std::string& fileName)
 {
-	struct ParametersWind pa;
+	// struct ParametersWind pa;
 
 
 	char bufSend[256];
@@ -2106,37 +2130,37 @@ void TaskFan2(const std::string& fileName)
 		std::cout << "angle " << root["angle"].asDouble() << std::endl;
 		/*******************************temporary comment*********************************/
 
-		pa.pianhang = fd.yaw;
-		pa.jiangye = root["angle"].asDouble();
-		//pa.jiangye = 4.2;
+		// pa.pianhang = fd.yaw;
+		// pa.jiangye = root["angle"].asDouble();
+		// //pa.jiangye = 4.2;
 
-		pa.tagaoH = fd.towerHeight;
-		pa.jiangyeR = fd.bladeLen;
+		// pa.tagaoH = fd.towerHeight;
+		// pa.jiangyeR = fd.bladeLen;
 
-		pa.startingPoint[0] = fd.cenLat;
-		pa.startingPoint[1] = fd.cenLon;
-		pa.startingPoint[2] = fd.cenAlt;
+		// pa.startingPoint[0] = fd.cenLat;
+		// pa.startingPoint[1] = fd.cenLon;
+		// pa.startingPoint[2] = fd.cenAlt;
 
-		pa.shootS0 = fd.distanceForCheck;
-		pa.shootS = fd.distanceForWork;
-		pa.shootD = fd.relativeAlt;
-		pa.shootMidu = fd.shootThickness;
+		// pa.shootS0 = fd.distanceForCheck;
+		// pa.shootS = fd.distanceForWork;
+		// pa.shootD = fd.relativeAlt;
+		// pa.shootMidu = fd.shootThickness;
 
-		printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
-		printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
-		printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
+		// printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
+		// printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
+		// printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
 
-		PointWork pw;
-		// int res = 1;
-		int res = model_emulat(pa, &pw);
-		printf("res :%d\r\n", res);
-		printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
-		printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
-		for (int i = 0; i < res; i++)
-		{
-			printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
-		}
-		printf("printLocation task start %s\r\n", fd.missionID.c_str());
+		// PointWork pw;
+		int res = 1;
+		// int res = model_emulat(pa, &pw);
+		// printf("res :%d\r\n", res);
+		// printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
+		// printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
+		// for (int i = 0; i < res; i++)
+		// {
+		// 	printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
+		// }
+		// printf("printLocation task start %s\r\n", fd.missionID.c_str());
 
 		/*******************************temporary comment*********************************/
 
@@ -2167,21 +2191,21 @@ void TaskFan2(const std::string& fileName)
 
 		MissionTask missonTasks[res];
 		/*******************************temporary comment*********************************/
-		for (int i = 0; i < res; i++)
-		{
-			char buf[256];
-			memset(buf, 0, 256);
-			sprintf(buf, "%f,%f,%f", pw.work[i].e, pw.work[i].f, 0.0);
+		// for (int i = 0; i < res; i++)
+		// {
+		// 	char buf[256];
+		// 	memset(buf, 0, 256);
+		// 	sprintf(buf, "%f,%f,%f", pw.work[i].e, pw.work[i].f, 0.0);
 
-			missonTasks[i].wayPointAction = "4,5,1";
-			missonTasks[i].wayPointActionParam = buf;
-			missonTasks[i].shootPhotoDistanceInterval = 0.0;
-			missonTasks[i].shootPhotoTimeInterval = 0.0;
-			missonTasks[i].wayPointSpeed = 5.0;
-			missonTasks[i].wayPointAltitude = pw.work[i].alt;
-			missonTasks[i].wayPointLongitude = pw.work[i].lng;;
-			missonTasks[i].wayPointLatitude = pw.work[i].lat;
-		}
+		// 	missonTasks[i].wayPointAction = "4,5,1";
+		// 	missonTasks[i].wayPointActionParam = buf;
+		// 	missonTasks[i].shootPhotoDistanceInterval = 0.0;
+		// 	missonTasks[i].shootPhotoTimeInterval = 0.0;
+		// 	missonTasks[i].wayPointSpeed = 5.0;
+		// 	missonTasks[i].wayPointAltitude = pw.work[i].alt;
+		// 	missonTasks[i].wayPointLongitude = pw.work[i].lng;;
+		// 	missonTasks[i].wayPointLatitude = pw.work[i].lat;
+		// }
 		/*******************************temporary comment*********************************/
 
 		printf("get lat %.14lf %.14lf\r\n", missonTasks[0].wayPointAltitude, missonTasks[0].wayPointLongitude);
@@ -2238,7 +2262,7 @@ void TaskFan2(const std::string& fileName)
 		jsonValue_cb["pCode"] = "341001";
 
 		std::cout << jsonValue_cb.toStyledString() << std::endl;
-		topic_cb->publish(jsonValue_cb.toStyledString());
+		// topic_cb->publish(jsonValue_cb.toStyledString());
 
 		fanStep = 2;
 		fileNum = res;

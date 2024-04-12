@@ -18,6 +18,8 @@ add_definitions(-D_GNU_SOURCE)
 find_package(jsoncpp CONFIG REQUIRED)
 include_directories(/usr/include/jsoncpp/)
 
+find_library(WINDSP_LIB NAMES windsp HINTS /usr/local/lib)
+
 # include_directories(/home/rer/mybin2/)
 ############################## csg ######################################
 
@@ -161,5 +163,11 @@ endif ()
 # )
 target_link_libraries(${PROJECT_NAME}
   jsoncpp_lib
+  paho-mqtt3a
+  paho-mqtt3c
+  paho-mqttpp3
 )
+# windsp
+target_link_libraries(${PROJECT_NAME} /usr/local/lib/libwindsp.a)
+target_include_directories(${PROJECT_NAME} PRIVATE /usr/local/include)
 ############################## csg ######################################
