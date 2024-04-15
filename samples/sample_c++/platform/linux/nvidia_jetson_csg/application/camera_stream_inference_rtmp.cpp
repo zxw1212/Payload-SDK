@@ -5,7 +5,6 @@
 
 #include "liveview/test_liveview.hpp"
 #include "dji_error.h"
-// #include "taskmanage.h"
 
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/opencv.hpp"
@@ -49,7 +48,7 @@ void* MyRtmp_Task(void* arg) {
 
   std::string sPipeline = "appsrc ! videoconvert ! omxh264enc bitrate=8000000 ! flvmux ! rtmpsink location=";
   sPipeline = sPipeline + s_RTMP_URI + "/live" + s_CLIENT_ID + "_flight sync=false";
-  writer.open(sPipeline, 0, 30, cv::Size(1920, 1440), true);
+  writer.open(sPipeline, 0, 30/*videoFps*/, cv::Size(1920, 1440), true);
   if (!writer.isOpened()) {
       printf("Can't Create video writer.\n");
       return NULL;

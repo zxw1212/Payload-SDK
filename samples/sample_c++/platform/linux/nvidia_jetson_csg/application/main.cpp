@@ -55,19 +55,8 @@ int main(int argc, char** argv) {
 
 #ifdef EnableMQTT
   // setup param of MQTT
-  std::ifstream ifs2;
-  ifs2.open("/sys/firmware/devicetree/base/serial-number", ios::in);
-  if (!ifs2.is_open()) {
-    std::cout << "open file /sys/firmware/devicetree/base/serial-number error!"
-              << std::endl;
-    return -1;
-  }
-  char cpuid[128];
-  memset(cpuid, 0, 128);
-  while (ifs2 >> cpuid) {
-    std::cout << "cpu id is: " << cpuid << std::endl;
-  }
-  std::ifstream ifs;
+  system("pwd");
+  ifstream ifs;
   ifs.open("/home/rer/mybin/bin/config.json");
   if (!ifs.is_open()) {
     std::cout << "open file /home/rer/mybin/bin/config.json error!"
@@ -80,14 +69,11 @@ int main(int argc, char** argv) {
     std::cout << "parse json file error!" << std::endl;
     return -1;
   }
-  std::string mqtt_url = root["mqtt_url"].asString();
-  std::string mqtt_username = root["mqtt_username"].asString();
-  std::string mqtt_passwd = root["mqtt_passwd"].asString();
-  s_CLIENT_ID = cpuid;
-  s_CLIENT_ID = "/" + s_CLIENT_ID;
-  s_CLIENT_ID = "/dongguan-sai-001";
-  s_RTMP_URI = root["rtmp_url"].asString();
-  s_HTTP_URI = root["http_url"].asString();
+  std::string SERVER_ADDRESS = root["SERVER_ADDRESS"].asString();
+  s_CLIENT_ID = root["CLIENT_ID"].asString();
+  s_RTMP_URI = root["RTMP_URI"].asString();
+  s_HTTP_URI = root["HTTP_URI"].asString();
+
   i_Mode = root["MODE"].asInt();
   std::cout << "s_CLIENT_ID: " << s_CLIENT_ID << ", s_RTMP_URI: " << s_RTMP_URI
             << std::endl;
@@ -105,7 +91,7 @@ int main(int argc, char** argv) {
                         .max_buffered_messages(kMAX_BUFFERED_MESSAGES)
                         .delete_oldest_messages()
                         .finalize();
-  mqtt::async_client client(mqtt_url, s_CLIENT_ID, createOpts);
+  mqtt::async_client client(SERVER_ADDRESS, s_CLIENT_ID, createOpts);
   cli = &client;
   cli->set_connected_handler([&client](const string&) {
     std::cout << "*** MQTT Connected ***" << std::endl;
