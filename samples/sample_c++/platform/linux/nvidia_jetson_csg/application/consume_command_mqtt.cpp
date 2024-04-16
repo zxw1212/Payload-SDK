@@ -1,3 +1,5 @@
+#include "consume_command_mqtt.h"
+
 #include <iostream>
 #include <string>
 #include <chrono>
@@ -5,7 +7,11 @@
 #include <time.h>
 #include <algorithm>
 #include <vector>
-#include "consume_command_mqtt.h"
+
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include "subscribe_helper.h"
 #include "callback_state.h"
 
@@ -77,6 +83,11 @@ uint32_t downloadStartMs = 0;
 uint32_t downloadEndMs = 0;
 char downloadFileName[TEST_CAMERA_MANAGER_MEDIA_FILE_NAME_MAX_SIZE] = {0};
 uint32_t s_nextDownloadFileIndex = 0;
+
+constexpr int CMD_SEND_LEN = 1024;
+constexpr int CMD_REC_LEN = 1024;
+constexpr int CABIN_ANGLE_TRUE_CODE = 20000; // Fan yaw angle calculation success code
+constexpr int BLADE_ANGLE_TRUE_CODE = 20000; // Blade angle calculation success code
 
 typedef struct {
     uint8_t missionState;
@@ -484,6 +495,8 @@ typedef struct
 	double cenLat;
 	double cenLon;
 	double cenAlt;
+	double speedForScan;
+	double distanceForScan;
 	double speedForCheck;
 	double distanceForCheck;
 	double speedForWork;
@@ -520,8 +533,11 @@ void MQTT_Camera();
 void MQTT_Gen();
 void MQTT_V3();
 void MQTT_FAN();
-void TaskFan();
-void TaskFan2(const std::string& fileName);
+bool TaskFanScan();
+bool TaskFanCheck(const std::string& fileName);
+bool TaskFanWork(const std::string& fileName);
+
+bool is_fan_task_valid = false; //Fan mission working
 
 /**
  * @brief Download file to media file list path&name.
@@ -660,16 +676,16 @@ void executeCMD(const char* cmd /*shell command*/, char* result)
 {
 	printf("executeCMD %s\r\n", result);
 
-	char buf_ps[1024];
-	char ps[1024] = { 0 };
+	char buf_ps[CMD_REC_LEN];
+	char ps[CMD_SEND_LEN] = { 0 };
 	FILE* ptr;
 	strcpy(ps, cmd);
 	if ((ptr = popen(ps, "r")) != NULL)
 	{
-		while (fgets(buf_ps, 1024, ptr) != NULL)
+		while (fgets(buf_ps, CMD_REC_LEN, ptr) != NULL)
 		{
 			strcat(result, buf_ps);
-			if (strlen(result) > 1024)
+			if (strlen(result) > CMD_REC_LEN)
 				break;
 		}
 		pclose(ptr);
@@ -681,16 +697,6 @@ void executeCMD(const char* cmd /*shell command*/, char* result)
 	}
 }
 
-//{
-//	"execMissionID": "1681397602",
-//		"waypointIndex" : 1,
-//		"latitude" : 20.60670661,
-//		"longitude" : 110.48439074,
-//		"altitude" : 50.24,
-//		"height" : 90.68,
-//		"mediaType" : 0
-//}
-///home/rer/mybin/bin/hyPost 1681397602 2 20.60670661 110.48439074 50.24 90.68 1 052.jpg 2>&1
 int SendFile(const std::string& execMissionID, 
 			 int waypointIndex,
 			 double latitude,
@@ -700,10 +706,10 @@ int SendFile(const std::string& execMissionID,
 			 int mediaType,
 			 const std::string& filePath,
 			 const std::string& urls) {
-	char bufSend[256];
-	char bufRec[256];
-	memset(bufSend, 0, 256);
-	memset(bufRec, 0, 256);
+	char bufSend[CMD_SEND_LEN];
+	char bufRec[CMD_REC_LEN];
+	memset(bufSend, 0, CMD_SEND_LEN);
+	memset(bufRec, 0, CMD_REC_LEN);
 
 	printf("sendfile\r\n");
 
@@ -738,9 +744,6 @@ void* MySendFile_Task(void* arg)
 
 		UpdateStatus("00007");
 
-		T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
-		uint16_t downloadCount = 0;
-
 		s_nextDownloadFileIndex = 0;
 		returnCode = DjiCameraManager_RegDownloadFileDataCallback(E_DjiMountPosition::DJI_MOUNT_POSITION_PAYLOAD_PORT_NO1, DjiTest_CameraManagerDownloadFileDataCallback);
 		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
@@ -760,6 +763,8 @@ void* MySendFile_Task(void* arg)
 			return NULL;
 		}
 
+		T_DjiOsalHandler *osalHandler = DjiPlatform_GetOsalHandler();
+		uint16_t downloadCount = 0;
 		if (s_meidaFileList.totalCount > 0) {
 			downloadCount = s_meidaFileList.totalCount;
 			printf(
@@ -795,7 +800,6 @@ void* MySendFile_Task(void* arg)
 				}
 			}
 			printf("\r\n");
-
 			osalHandler->TaskSleepMs(1000);
 
 			// Download all files in file list, maybe we can choose download index in 'for (int i = 0; i < fileNum; i++)'.
@@ -870,20 +874,19 @@ void* MySendFile_Task(void* arg)
 
 			// copy the download file to user defined path
 			std::string copyCommand = "cp " + last_path_N_file_name + " " + lastPathNFilename;
+			std::cout << "copying download..." << std::endl;
 			int result = std::system(copyCommand.c_str());
 			if (result != 0) {
 				std::cout << "文件拷贝失败！" << std::endl;
 				return NULL;
 			}
 			
-			if (fanStep == 1)
+			if (fanStep == 1 || fanStep == 2)
 			{
 				;
 			}
-			else if (fanStep == 2)
+			else if (fanStep == 3)
 			{
-				//SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, lastPathNFilename);
-
 				fs.download = i + 1;
 				fs.downloadFail = 0;
 				fs.upload = i + 1;
@@ -893,37 +896,77 @@ void* MySendFile_Task(void* arg)
 
 			}
 		}
+		bool is_success;
 		if (fanStep == 1)
 		{
 			if (i_Mode == 0)
 			{
-				TaskFan2("/task/test.jpg");
+				is_success = TaskFanCheck("/task/test_check.jpg");
 			}
 			else
 			{
-				TaskFan2(lastPathNFilename);
+				is_success = TaskFanCheck(lastPathNFilename);
+			}
+			if(!is_success) {
+				is_fan_task_valid = false;
 			}
 		}
 		else if (fanStep == 2)
 		{
+			if (i_Mode == 0)
+			{
+				is_success = TaskFanWork("/task/test_work.jpg");
+			}
+			else
+			{
+				is_success = TaskFanWork(lastPathNFilename);
+			}
+			if(!is_success) {
+				is_fan_task_valid = false;
+			}
+		}
+		else if (fanStep == 3)
+		{
+			modeFly = "STANDBY";
 			UpdateStatus("00005");
+			is_fan_task_valid = false;
 
-
-			char bufSend[256];
-			char bufRec[256];
-			memset(bufSend, 0, 256);
-			memset(bufRec, 0, 256);
+			char bufSend[CMD_SEND_LEN];
+			char bufRec[CMD_REC_LEN];
+			memset(bufSend, 0, CMD_SEND_LEN);
+			memset(bufRec, 0, CMD_REC_LEN);
 
 			printf("sendfile\r\n");
 
-			sprintf(bufSend, "/home/rer/mybin/bin/hyPost %s  %s 2>&1", jv_waypoint["execMissionID"].asCString(), uploadUrl.c_str());
+			DIR* dir;
+			struct dirent* ent;
+			std::string photoDir = "./task/" + jv_waypoint["execMissionID"].asString();
+			std::vector<std::string> photo_filenames;
+			if((dir = opendir(photoDir.c_str())) != NULL) {
+				while((ent = readdir(dir)) != NULL) {
+					std::string filename = ent->d_name;
+					if (filename.substr(filename.find_last_of(".")) == ".jpg") {
+						filename = photoDir + "/" + filename;
+						photo_filenames.push_back(filename);
+					}
+				}
+				closedir(dir);
+			} else {
+				printf("Failed to open directory\n");
+			}
 
-			printf("%s\r\n", bufSend);
-
-			executeCMD(bufSend, bufRec);
-			std::cout << bufRec << std::endl;
+			std::sort(photo_filenames.begin(), photo_filenames.end(), [](const std::string& a_path, const std::string& b_path) {
+				struct stat a_stat, b_stat;
+				stat(a_path.c_str(), &a_stat);
+				stat(b_path.c_str(), &b_stat);
+				return a_stat.st_mtime > b_stat.st_mtime;
+			});
+			int photoIndex = 1;
+			int photo_count = photo_filenames.size();
+			for(int i = 0; i < photo_filenames.size() - 2; i++) {
+				SendFile(jv_waypoint["execMissionID"].asString(), i + 1, 20.607123, 110.221142, 80.25, 50.21, 0, photo_filenames[i], uploadUrl);
+			}
 		}
-
 	}
 }
 
@@ -1221,6 +1264,7 @@ out:
         USER_LOG_ERROR("Deinit waypoint V2 sample failed, error code: 0x%08X", returnCode);
 		return NULL;
     }
+	// TODO delete flightSample、p、g?
 }
 
 typedef struct MissionTask
@@ -1233,8 +1277,8 @@ typedef struct MissionTask
 	double wayPointAltitude;
 
 	double wayPointSpeed;
-	double shootPhotoTimeInterval;
-	double shootPhotoDistanceInterval;
+	double shootPhotoTimeInterval; // unused for now
+	double shootPhotoDistanceInterval; // unused for now
 } MissionTask;
 // print WaypointV2 location
 void printLocation(T_DjiWaypointV2 val)
@@ -1779,8 +1823,8 @@ void MQTT_Mission()
 				jv_waypoint["missionUploadedIndex"] = sz;
 				jv_waypoint["missionExecState"] = "INITIALIZING";
 
-				fanStep = 2;
-				fileNum = sz;
+				// fanStep = 2;
+				// fileNum = sz;
 
 				jsonValue_param["missionID"] = jv_waypoint["execMissionID"];
 
@@ -1806,9 +1850,17 @@ void MQTT_Mission()
 	case 10004:
 		break;
 	case 10006: // MISSION START
-		if (jsonValue_msg.isMember("param"))
+		if(!is_fan_task_valid) {
+			modeFly = "STANDBY";
+			UpdateStatus("00003");
+			jsonValue_cb["code"] = callback_unknown_error;
+			jsonValue_cb["msg"] = "There are no ongoing fan tasks. The airline is wrong and cannot be executed.";
+			break;
+		}
+		else if (jsonValue_msg.isMember("param"))
 		{
-			UpdateStatus("00002");
+			const int TASK_START_TIME = 10; // wait time for server.
+			time_t start_time = time(0);
 			if (jsonValue_msg["param"].isMember("missionID"))
 			{
 				auto missionID = jsonValue_msg["param"]["missionID"];
@@ -1831,6 +1883,13 @@ void MQTT_Mission()
 
 				returnCode = DjiWaypointV2_Start();
 				if (returnCode == DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+					time_t end_time = time(0);
+					while (difftime(end_time, start_time) < TASK_START_TIME) {
+						end_time = time(0);
+						osalHandler->TaskSleepMs(1000);
+					}
+					std::cout << "10006 time: " << start_time << "  00002 time: " << end_time << std::endl;
+					UpdateStatus("00002");
 					modeFly = "EXECUTING";
 					jsonValue_cb["code"] = callback_success_code;
 					jsonValue_cb["msg"] = "success";
@@ -1917,18 +1976,17 @@ void MQTT_Mission()
 	}
 }
 
-void TaskFan()
+bool TaskFanScan()
 {
 	T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
 	if (!osalHandler) {
 		USER_LOG_ERROR("DjiPlatform_GetOsalHandler failed");
-		return;
+		return false;
 	}
 
-	/*******************************temporary comment*********************************/
 	struct ParametersWind pa;
 
-	pa.pianhang = fd.yaw;
+	pa.pianhang = 0;
 	pa.jiangye = 50.53;
 	pa.tagaoH = fd.towerHeight;
 	pa.jiangyeR = fd.bladeLen;
@@ -1937,28 +1995,36 @@ void TaskFan()
 	pa.startingPoint[1] = fd.cenLon;
 	pa.startingPoint[2] = fd.cenAlt;
 
-	pa.shootS0 = fd.distanceForCheck;
+	pa.shootDScan = fd.distanceForScan;
+	pa.shootSCheck = fd.distanceForCheck;
 	pa.shootS = fd.distanceForWork;
 	pa.shootD = fd.relativeAlt;
 	pa.shootMidu = fd.shootThickness;
+	pa.flightAlt = fd.flightAlt;
+	pa.returnAlt = fd.returnAlt;
 
 	printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
 	printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
-	printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
+	printf("%10.8f,%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootDScan, pa.shootSCheck, pa.shootS, pa.shootD, pa.shootMidu);
+	printf("%d,%d\r\n", pa.flightAlt, pa.returnAlt);
 
 	PointWork pw;
 
 	int res = model_emulat(pa, &pw);
 
 	printf("res :%d\r\n", res);
-	printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
-	printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
-	for (int i = 0; i < res; i++)
+
+	for(int i = 0; i < pw.vaildNum[0]; i++) {
+		printf("scan %d: %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", i, pw.scan[i].lat, pw.scan[i].lng, pw.scan[i].alt, pw.scan[i].e, pw.scan[i].f);
+	}
+	for(int i = 0; i < pw.vaildNum[1]; i++) {
+		printf("check %d: %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", i, pw.check[i].lat, pw.check[i].lng, pw.check[i].alt, pw.check[i].e, pw.check[i].f);
+	}
+	for (int i = 0; i < pw.vaildNum[2]; i++)
 	{
-		printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
+		printf("work %d : %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", i, pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
 	}
 	printf("printLocation task start %s\r\n", fd.missionID.c_str());
-	/*******************************temporary comment*********************************/
 
 
 	// TODO{zengxw} can not find psdk api like this
@@ -1977,47 +2043,50 @@ void TaskFan()
 
 	modeFly = "READY_TO_GO";
 
-	MissionTask missonTasks[2];
+	int scan_vaild_num = pw.vaildNum[0];
+	MissionTask missonTasks[scan_vaild_num];
 
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < scan_vaild_num; i++)
 	{
-		char buf[256];
-		memset(buf, 0, 256);
-	/*******************************temporary comment*********************************/
+		if(i == scan_vaild_num - 1) {
+			char buf[256];
+			memset(buf, 0, 256);
+			sprintf(buf, "%f,%f,1", pw.scan[i].e, pw.scan[i].f);
 
-		sprintf(buf, "%f,%f,1", pw.start[i].e, pw.start[i].f);
+			missonTasks[i].wayPointAction = "4,5,1";
+			missonTasks[i].wayPointActionParam = buf;
+		} else {
+			missonTasks[i].wayPointAction = "";
+			missonTasks[i].wayPointActionParam = "";
+		}
 
-		missonTasks[i].wayPointAction = "4,5,1";
-		missonTasks[i].wayPointActionParam = buf;
 		missonTasks[i].shootPhotoDistanceInterval = 0.0;
 		missonTasks[i].shootPhotoTimeInterval = 0.0;
-		missonTasks[i].wayPointSpeed = 4.0;
-		missonTasks[i].wayPointAltitude = pw.start[i].alt;
-		missonTasks[i].wayPointLongitude = pw.start[i].lng;;
-		missonTasks[i].wayPointLatitude = pw.start[i].lat;
+		missonTasks[i].wayPointSpeed = fd.speedForScan;
+		missonTasks[i].wayPointAltitude = pw.scan[i].alt;
+		missonTasks[i].wayPointLongitude = pw.scan[i].lng;;
+		missonTasks[i].wayPointLatitude = pw.scan[i].lat;
 		printf("get lat %.14lf %.14lf\r\n", missonTasks[i].wayPointLatitude, missonTasks[i].wayPointLongitude);
-	/*******************************temporary comment*********************************/
-
 	}
 	
-	const auto mission_vec = generatePolygonWaypoints3(missonTasks, 2);
-	T_DjiWaypointV2 missions[2];
-	for (size_t i = 0; i < 2; i++) {
+	const auto mission_vec = generatePolygonWaypoints3(missonTasks, scan_vaild_num);
+	T_DjiWaypointV2 missions[scan_vaild_num];
+	for (size_t i = 0; i < scan_vaild_num; i++) {
 		missions[i] = mission_vec[i];
 	}
 	missionInitSettings.mission = missions;
-	missionInitSettings.missTotalLen = 2;
+	missionInitSettings.missTotalLen = scan_vaild_num;
 
 	for_each(mission_vec.begin(), mission_vec.end(), printLocation);
 
-	const auto action_vec = generateWaypointActions3(missonTasks, 2);
-	T_DJIWaypointV2Action actions[2];
-	for (size_t i = 0; i < 2; i++) {
+	const auto action_vec = generateWaypointActions3(missonTasks, scan_vaild_num);
+	T_DJIWaypointV2Action actions[scan_vaild_num];
+	for (size_t i = 0; i < scan_vaild_num; i++) {
 		actions[i] = action_vec[i];
 	}
 	T_DJIWaypointV2ActionList action_list;
 	action_list.actions = actions;
-	action_list.actionNum = 2;
+	action_list.actionNum = scan_vaild_num;
 	missionInitSettings.actionList = action_list;
 	
 	returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
@@ -2029,19 +2098,19 @@ void TaskFan()
 
 
 	jsonValue_param["missionID"] = jv_waypoint["execMissionID"].asString();
-	jsonValue_param["missionTotal"] = 2;
+	jsonValue_param["missionTotal"] = 3;
 	jsonValue_param["missionCount"] = 1;
 
-
+	jsonValue_param["mission"].clear(); // start as all new mission
 	Json::Value item;
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < scan_vaild_num; i++)
 	{
-		item["wayPointLatitude"] = missonTasks[0].wayPointLatitude;
-		item["wayPointLongitude"] = missonTasks[0].wayPointLongitude;
-		item["wayPointAltitude"] = missonTasks[0].wayPointAltitude;
-		item["wayPointSpeed"] = missonTasks[0].wayPointSpeed;
-		item["wayPointAction"] = missonTasks[0].wayPointAction;
-		item["wayPointActionParam"] = missonTasks[0].wayPointActionParam;
+		item["wayPointLatitude"] = missonTasks[i].wayPointLatitude;
+		item["wayPointLongitude"] = missonTasks[i].wayPointLongitude;
+		item["wayPointAltitude"] = missonTasks[i].wayPointAltitude;
+		item["wayPointSpeed"] = missonTasks[i].wayPointSpeed;
+		item["wayPointAction"] = missonTasks[i].wayPointAction;
+		item["wayPointActionParam"] = missonTasks[i].wayPointActionParam;
 
 		jsonValue_param["mission"].append(item);
 	}
@@ -2064,18 +2133,19 @@ void TaskFan()
 
 	fanStep = 1;
 	fileNum = 1;
+
+	return true;
 }
-// waypoint task according to photo
-void TaskFan2(const std::string& fileName)
+
+bool TaskFanCheck(const std::string& fileName)
 {
 	struct ParametersWind pa;
 
-
-	char bufSend[256];
-	char bufRec[256];
-	memset(bufSend, 0, 256);
-	memset(bufRec, 0, 256);
-	sprintf(bufSend, "python3 /home/rer/mybin/bin/windPost.py %s 2>&1", fileName.c_str());
+	char bufSend[CMD_SEND_LEN];
+	char bufRec[CMD_REC_LEN];
+	memset(bufSend, 0, CMD_SEND_LEN);
+	memset(bufRec, 0, CMD_REC_LEN);
+	sprintf(bufSend, "python3 /home/rer/mybin/bin/windPost.py 1 %s 2>&1", fileName.c_str());  // [python windPost.py algo_type image_path]  偏航角算法algo_type=1
 	printf("%s\r\n", bufSend);
 
 	executeCMD(bufSend, bufRec);
@@ -2090,9 +2160,13 @@ void TaskFan2(const std::string& fileName)
 
 	if (root.isMember("path"))
 	{
-		std::cout << "path " << root["path"].asString() << std::endl;
+		std::string filePath = root["path"].asString();
+		if(filePath.empty()) {
+			filePath = fileName; 
+		}
+		std::cout << "path " << filePath << std::endl;
 
-		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, root["path"].asString(), uploadUrl);
+		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
 
 		fs.download = 1;
 		fs.downloadFail = 0;
@@ -2101,10 +2175,212 @@ void TaskFan2(const std::string& fileName)
 		fs.uploadTotal = 1;
 		UpdateStatus("00006");
 	}
-	if (root.isMember("angle"))
+	bool is_algo_res_true = (root.isMember("angle") && root.isMember("code") && root["code"].asInt() == CABIN_ANGLE_TRUE_CODE);
+	if (is_algo_res_true)
 	{
 		std::cout << "angle " << root["angle"].asDouble() << std::endl;
-		/*******************************temporary comment*********************************/
+
+		pa.pianhang = -root["angle"].asDouble();
+		fd.yaw = -root["angle"].asDouble();
+		pa.jiangye = 50.53;
+
+
+		pa.tagaoH = fd.towerHeight;
+		pa.jiangyeR = fd.bladeLen;
+
+		pa.startingPoint[0] = fd.cenLat;
+		pa.startingPoint[1] = fd.cenLon;
+		pa.startingPoint[2] = fd.cenAlt;
+
+		pa.shootDScan = fd.distanceForScan;
+		pa.shootSCheck = fd.distanceForCheck;
+		pa.shootS = fd.distanceForWork;
+		pa.shootD = fd.relativeAlt;
+		pa.shootMidu = fd.shootThickness;
+		pa.flightAlt = fd.flightAlt;
+		pa.returnAlt = fd.returnAlt;
+
+		printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
+		printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
+		printf("%10.8f,%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootDScan, pa.shootSCheck, pa.shootS, pa.shootD, pa.shootMidu);
+		printf("%d,%d\r\n", pa.flightAlt, pa.returnAlt);
+
+		PointWork pw;
+
+		int res = model_emulat(pa, &pw);
+		
+		printf("check res :%d\r\n", res);
+		for(int i = 0; i < pw.vaildNum[1]; i++) {
+			printf("check %d: %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", i, pw.check[i].lat, pw.check[i].lng, pw.check[i].alt, pw.check[i].e, pw.check[i].f);
+		}	
+		
+		printf("fun task start %s\r\n", fd.missionID.c_str());
+
+		T_DjiWaypointV2GlobalCruiseSpeed getGlobalCruiseSpeed = 0;
+		returnCode = DjiWaypointV2_GetGlobalCruiseSpeed(&getGlobalCruiseSpeed);
+		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+			USER_LOG_ERROR("Get global cruise speed failed, error code: 0x%08X", returnCode);
+		} else{
+			USER_LOG_INFO("Current global cruise speed is %f m/s", getGlobalCruiseSpeed);
+		}
+		T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
+		osalHandler->TaskSleepMs(1000);
+
+		// TODO{zengxw} can not find psdk api like this
+		// vehicle->control->obtainCtrlAuthority(1);
+
+		T_DjiWayPointV2MissionSettings missionInitSettings;
+		missionInitSettings.missionID = rand();
+		missionInitSettings.repeatTimes = 1;
+		missionInitSettings.finishedAction = E_DJIWaypointV2MissionFinishedAction::DJI_WAYPOINT_V2_FINISHED_NO_ACTION;
+		missionInitSettings.maxFlightSpeed = 10;
+		missionInitSettings.autoFlightSpeed = fd.speedForCheck;
+		missionInitSettings.actionWhenRcLost = E_DJIWaypointV2MissionActionWhenRcLost::DJI_WAYPOINT_V2_MISSION_STOP_WAYPOINT_V2_AND_EXECUTE_RC_LOST_ACTION;
+		missionInitSettings.gotoFirstWaypointMode = E_DJIWaypointV2MissionGotoFirstWaypointMode::DJI_WAYPOINT_V2_MISSION_GO_TO_FIRST_WAYPOINT_MODE_SAFELY;
+
+		modeFly = "READY_TO_GO";
+
+		int check_vaild_num = pw.vaildNum[1];
+		MissionTask missonTasks[check_vaild_num];
+
+		for (int i = 0; i < check_vaild_num; i++)
+		{
+			if(i == check_vaild_num - 1) {
+				char buf[256];
+				memset(buf, 0, 256);
+				sprintf(buf, "%f,%f,1", pw.check[i].e, pw.check[i].f);
+
+				missonTasks[i].wayPointAction = "4,5,1";
+				missonTasks[i].wayPointActionParam = buf;
+			} else {
+				missonTasks[i].wayPointAction = "";
+				missonTasks[i].wayPointActionParam = "";
+			}
+			
+			missonTasks[i].shootPhotoDistanceInterval = 0.0;
+			missonTasks[i].shootPhotoTimeInterval = 0.0;
+			missonTasks[i].wayPointSpeed = fd.speedForCheck;
+			missonTasks[i].wayPointAltitude = pw.check[i].alt;
+			missonTasks[i].wayPointLongitude = pw.check[i].lng;;
+			missonTasks[i].wayPointLatitude = pw.check[i].lat;
+		}
+
+		printf("get lat %.14lf %.14lf\r\n", missonTasks[0].wayPointAltitude, missonTasks[0].wayPointLongitude);
+		const auto mission_vec = generatePolygonWaypoints3(missonTasks, check_vaild_num);
+		T_DjiWaypointV2 missions[check_vaild_num];
+		for (size_t i = 0; i < check_vaild_num; i++) {
+			missions[i] = mission_vec[i];
+		}
+		missionInitSettings.mission = missions;
+		missionInitSettings.missTotalLen = check_vaild_num;
+
+		for_each(mission_vec.begin(), mission_vec.end(), printLocation);
+
+		const auto action_vec = generateWaypointActions3(missonTasks, check_vaild_num);
+		T_DJIWaypointV2Action actions[check_vaild_num];
+		for (size_t i = 0; i < check_vaild_num; i++) {
+			actions[i] = action_vec[i];
+		}
+		T_DJIWaypointV2ActionList action_list;
+		action_list.actions = actions;
+		action_list.actionNum = check_vaild_num;
+		missionInitSettings.actionList = action_list;
+		returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
+		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+			USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
+		}
+		osalHandler->TaskSleepMs(1000);
+
+		Json::Value item;
+		for (int i = 0; i < check_vaild_num; i++)
+		{
+			item["wayPointLatitude"] = missonTasks[i].wayPointLatitude;
+			item["wayPointLongitude"] = missonTasks[i].wayPointLongitude;
+			item["wayPointAltitude"] = missonTasks[i].wayPointAltitude;
+			item["wayPointSpeed"] = missonTasks[i].wayPointSpeed;
+			item["wayPointAction"] = missonTasks[i].wayPointAction;
+			item["wayPointActionParam"] = missonTasks[i].wayPointActionParam;
+
+			jsonValue_param["mission"].append(item);
+		}
+
+		fanStep = 2;
+		fileNum = 1;
+	}
+
+	jsonValue_cb.clear();
+	jsonValue_cb["date"] = (int)now_t;
+
+	jsonValue_param["missionID"] = jv_waypoint["execMissionID"].asString();
+	jsonValue_param["missionTotal"] = 3;
+	jsonValue_param["missionCount"] = 2;
+	jsonValue_cb["param"] = jsonValue_param;
+	
+	jsonValue_cb["pCode"] = "341001";
+	if(is_algo_res_true) {
+		jsonValue_cb["msg"] = "success";
+		jsonValue_cb["code"] = callback_success_code;
+	} else {
+		jsonValue_cb["code"] = callback_unknown_error;
+		std::string error_msg;
+		if(root.isMember("message")) {
+			error_msg = "Cabin angle algorithm result error. Error message: " + root["message"].asString();
+		} else {
+			error_msg = "Cabin angle algorithm call error. ";
+		}
+		modeFly = "STANDBY";
+	}
+	
+		
+	std::cout << jsonValue_cb.toStyledString() << std::endl;
+	topic_cb->publish(jsonValue_cb.toStyledString());
+
+	return is_algo_res_true;
+}
+
+// waypoint task according to photo
+bool TaskFanWork(const std::string& fileName)
+{
+	struct ParametersWind pa;
+
+
+	char bufSend[CMD_SEND_LEN];
+	char bufRec[CMD_REC_LEN];
+	memset(bufSend, 0, CMD_SEND_LEN);
+	memset(bufRec, 0, CMD_REC_LEN);
+	sprintf(bufSend, "python3 /home/rer/mybin/bin/windPost.py 2 %s 2>&1", fileName.c_str());
+	printf("%s\r\n", bufSend);
+
+	executeCMD(bufSend, bufRec);
+	std::cout << bufRec << std::endl;
+
+	Json::Reader reader;
+	Json::Value root;
+	if (!reader.parse(bufRec, root, false))
+	{
+		std::cout << "parse json file error!" << std::endl;
+	}
+
+	if (root.isMember("path"))
+	{
+		std::string filePath = root["path"].asString();
+		if(filePath.empty()) {
+			filePath = fileName; 
+		}
+		std::cout << "path " << filePath << std::endl;
+
+		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+		fs.download = 1;
+		fs.downloadFail = 0;
+		fs.upload = 1;
+		fs.uploadFail = 0;
+		fs.uploadTotal = 1;
+		UpdateStatus("00006");
+	}
+	bool is_algo_res_true = (root.isMember("angle") && root.isMember("code") && root["code"].asInt() == BLADE_ANGLE_TRUE_CODE);
+	if (is_algo_res_true)
+	{
+		std::cout << "angle " << root["angle"].asDouble() << std::endl;
 
 		pa.pianhang = fd.yaw;
 		pa.jiangye = root["angle"].asDouble();
@@ -2117,35 +2393,35 @@ void TaskFan2(const std::string& fileName)
 		pa.startingPoint[1] = fd.cenLon;
 		pa.startingPoint[2] = fd.cenAlt;
 
-		pa.shootS0 = fd.distanceForCheck;
+		pa.shootDScan = fd.distanceForScan;
+		pa.shootSCheck = fd.distanceForCheck;
 		pa.shootS = fd.distanceForWork;
 		pa.shootD = fd.relativeAlt;
 		pa.shootMidu = fd.shootThickness;
+		pa.flightAlt = fd.flightAlt;
+		pa.returnAlt = fd.returnAlt;
 
 		printf("%10.8f,%10.8f,%10.8f,%10.8f\r\n", pa.pianhang, pa.jiangye, pa.tagaoH, pa.jiangyeR);
 		printf("%10.8f,%10.8f,%10.8f\r\n", pa.startingPoint[0], pa.startingPoint[1], pa.startingPoint[2]);
-		printf("%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootS0, pa.shootS, pa.shootD, pa.shootMidu);
+		printf("%10.8f,%10.8f,%10.8f,%10.8f,%d\r\n", pa.shootDScan, pa.shootSCheck, pa.shootS, pa.shootD, pa.shootMidu);
+		printf("%d,%d\r\n", pa.flightAlt, pa.returnAlt);
 
 		PointWork pw;
-		// int res = 1;
 		int res = model_emulat(pa, &pw);
-		printf("res :%d\r\n", res);
-		printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[0].lat, pw.start[0].lng, pw.start[0].alt, pw.start[0].e, pw.start[0].f);
-		printf("start %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.start[1].lat, pw.start[1].lng, pw.start[1].alt, pw.start[1].e, pw.start[1].f);
-		for (int i = 0; i < res; i++)
+		printf("work res :%d\r\n", res);
+		for (int i = 0; i < pw.vaildNum[2]; i++)
 		{
-			printf("%10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
+			printf("work %d : %10.8f,%10.8f,%10.8f,%10.8f,%10.8f\r\n", i, pw.work[i].lat, pw.work[i].lng, pw.work[i].alt, pw.work[i].e, pw.work[i].f);
 		}
-		printf("printLocation task start %s\r\n", fd.missionID.c_str());
-
-		/*******************************temporary comment*********************************/
+		printf("fun task start %s\r\n", fd.missionID.c_str());
 
     	T_DjiWaypointV2GlobalCruiseSpeed getGlobalCruiseSpeed = 0;
 		returnCode = DjiWaypointV2_GetGlobalCruiseSpeed(&getGlobalCruiseSpeed);
 		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 			USER_LOG_ERROR("Get global cruise speed failed, error code: 0x%08X", returnCode);
+		} else{
+			USER_LOG_INFO("Current global cruise speed is %f m/s", getGlobalCruiseSpeed);
 		}
-		USER_LOG_INFO("Current global cruise speed is %f m/s", getGlobalCruiseSpeed);
 		T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
 		osalHandler->TaskSleepMs(1000);
 
@@ -2158,52 +2434,56 @@ void TaskFan2(const std::string& fileName)
 		missionInitSettings.repeatTimes = 1;
 		missionInitSettings.finishedAction = E_DJIWaypointV2MissionFinishedAction::DJI_WAYPOINT_V2_FINISHED_GO_HOME;
 		missionInitSettings.maxFlightSpeed = 10;
-		missionInitSettings.autoFlightSpeed = 2;
+		missionInitSettings.autoFlightSpeed = fd.speedForWork;
 
 		missionInitSettings.actionWhenRcLost = E_DJIWaypointV2MissionActionWhenRcLost::DJI_WAYPOINT_V2_MISSION_STOP_WAYPOINT_V2_AND_EXECUTE_RC_LOST_ACTION;
-		missionInitSettings.gotoFirstWaypointMode = E_DJIWaypointV2MissionGotoFirstWaypointMode::DJI_WAYPOINT_V2_MISSION_GO_TO_FIRST_WAYPOINT_MODE_SAFELY;
+		missionInitSettings.gotoFirstWaypointMode = E_DJIWaypointV2MissionGotoFirstWaypointMode::DJI_WAYPOINT_V2_MISSION_GO_TO_FIRST_WAYPOINT_MODE_POINT_TO_POINT;
 
 		modeFly = "READY_TO_GO";
 
-		MissionTask missonTasks[res];
-		/*******************************temporary comment*********************************/
-		for (int i = 0; i < res; i++)
+		int work_vaild_num = pw.vaildNum[2];
+		MissionTask missonTasks[work_vaild_num];
+		char buf[256];
+		for (int i = 0; i < work_vaild_num; i++)
 		{
-			char buf[256];
-			memset(buf, 0, 256);
-			sprintf(buf, "%f,%f,%f", pw.work[i].e, pw.work[i].f, 0.0);
+			if (i < work_vaild_num - 2) { // take photo first
+				memset(buf, 0, 256);
+				sprintf(buf, "%f,%f,%f", pw.work[i].e, pw.work[i].f, 0.0);
 
-			missonTasks[i].wayPointAction = "4,5,1";
-			missonTasks[i].wayPointActionParam = buf;
+				missonTasks[i].wayPointAction = "4,5,1";
+				missonTasks[i].wayPointActionParam = buf;
+			} else { // go home with a heigher altitude, without taking photo
+				missonTasks[i].wayPointAction = "";
+				missonTasks[i].wayPointActionParam = "";
+			}
 			missonTasks[i].shootPhotoDistanceInterval = 0.0;
 			missonTasks[i].shootPhotoTimeInterval = 0.0;
-			missonTasks[i].wayPointSpeed = 5.0;
+			missonTasks[i].wayPointSpeed = fd.speedForWork;
 			missonTasks[i].wayPointAltitude = pw.work[i].alt;
 			missonTasks[i].wayPointLongitude = pw.work[i].lng;;
 			missonTasks[i].wayPointLatitude = pw.work[i].lat;
 		}
-		/*******************************temporary comment*********************************/
 
 		printf("get lat %.14lf %.14lf\r\n", missonTasks[0].wayPointAltitude, missonTasks[0].wayPointLongitude);
 
-		const auto mission_vec = generatePolygonWaypoints3(missonTasks, res);
-		T_DjiWaypointV2 missions[res];
-		for (size_t i = 0; i < res; i++) {
+		const auto mission_vec = generatePolygonWaypoints3(missonTasks, work_vaild_num);
+		T_DjiWaypointV2 missions[work_vaild_num];
+		for (size_t i = 0; i < work_vaild_num; i++) {
 			missions[i] = mission_vec[i];
 		}
 		missionInitSettings.mission = missions;
-		missionInitSettings.missTotalLen = res;
+		missionInitSettings.missTotalLen = work_vaild_num;
 
 		std::for_each(mission_vec.begin(), mission_vec.end(), printLocation);
 
-		const auto action_vec = generateWaypointActions3(missonTasks, res);
-		T_DJIWaypointV2Action actions[res];
-		for (size_t i = 0; i < res; i++) {
+		const auto action_vec = generateWaypointActions3(missonTasks, work_vaild_num);
+		T_DJIWaypointV2Action actions[work_vaild_num];
+		for (size_t i = 0; i < work_vaild_num; i++) {
 			actions[i] = action_vec[i];
 		}
 		T_DJIWaypointV2ActionList action_list;
 		action_list.actions = actions;
-		action_list.actionNum = res;
+		action_list.actionNum = work_vaild_num;
 		missionInitSettings.actionList = action_list;
 		
 		returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
@@ -2220,7 +2500,7 @@ void TaskFan2(const std::string& fileName)
 		jsonValue_param["missionTotal"] = 2;
 		jsonValue_param["missionCount"] = 2;
 		Json::Value item;
-		for (int i = 0; i < res; i++)
+		for (int i = 0; i < work_vaild_num; i++)
 		{
 			item["wayPointLatitude"] = missonTasks[i].wayPointLatitude;
 			item["wayPointLongitude"] = missonTasks[i].wayPointLongitude;
@@ -2232,18 +2512,39 @@ void TaskFan2(const std::string& fileName)
 			jsonValue_param["mission"].append(item);
 		}
 
-		jsonValue_cb["param"] = jsonValue_param;
+		fanStep = 3;
+		fileNum = pw.vaildNum[2] - 2;
+
+	}
+	jsonValue_cb.clear();
+	jsonValue_cb["date"] = (int)now_t;
+
+	jsonValue_param["missionID"] = jv_waypoint["execMissionID"].asString();
+	jsonValue_param["missionTotal"] = 3;
+	jsonValue_param["missionCount"] = 3;
+	jsonValue_cb["param"] = jsonValue_param;
+	
+	jsonValue_cb["pCode"] = "341001";
+	if(is_algo_res_true) {
 		jsonValue_cb["msg"] = "success";
 		jsonValue_cb["code"] = callback_success_code;
-		jsonValue_cb["pCode"] = "341001";
-
-		std::cout << jsonValue_cb.toStyledString() << std::endl;
-		topic_cb->publish(jsonValue_cb.toStyledString());
-
-		fanStep = 2;
-		fileNum = res;
+	} else {
+		jsonValue_cb["code"] = callback_unknown_error;
+		std::string error_msg;
+		if(root.isMember("message")) {
+			error_msg = "Blade angle algorithm result error. Error message: " + root["message"].asString();
+		} else {
+			error_msg = "Blade angle algorithm call error. ";
+		}
 	}
+		
+	std::cout << jsonValue_cb.toStyledString() << std::endl;
+	topic_cb->publish(jsonValue_cb.toStyledString());
+
+	return is_algo_res_true;
+
 }
+
 void MQTT_FAN()
 {
 	printf("MQTT_FAN\r\n");
@@ -2257,8 +2558,6 @@ void MQTT_FAN()
 		}
 		else
 		{
-			//TaskFan2("test.jpg");
-
 			if (jsonValue_msg["param"].isMember("towerHeight"))
 			{
 				fd.towerHeight = jsonValue_msg["param"]["towerHeight"].asDouble();
@@ -2281,10 +2580,10 @@ void MQTT_FAN()
 			{
 				fd.airportName = jsonValue_msg["param"]["airportName"].asString();
 			}
-			if (jsonValue_msg["param"].isMember("yaw"))
-			{
-				fd.yaw = jsonValue_msg["param"]["yaw"].asDouble();
-			}
+			// if (jsonValue_msg["param"].isMember("yaw"))
+			// {
+			// 	fd.yaw = jsonValue_msg["param"]["yaw"].asDouble();
+			// }
 			if (jsonValue_msg["param"].isMember("bladeLen"))
 			{
 				fd.bladeLen = jsonValue_msg["param"]["bladeLen"].asDouble();
@@ -2316,6 +2615,10 @@ void MQTT_FAN()
 			if (jsonValue_msg["param"].isMember("delFlag"))
 			{
 				fd.delFlag = jsonValue_msg["param"]["delFlag"].asString();
+			}
+			if (jsonValue_msg["param"].isMember("distanceForScan"))
+			{
+				fd.distanceForScan = jsonValue_msg["param"]["distanceForScan"].asInt();
 			}
 			if (jsonValue_msg["param"].isMember("distanceForCheck"))
 			{
@@ -2353,6 +2656,10 @@ void MQTT_FAN()
 			{
 				fd.returnAlt = jsonValue_msg["param"]["returnAlt"].asInt();
 			}
+			if (jsonValue_msg["param"].isMember("speedForScan"))
+			{
+				fd.speedForScan = jsonValue_msg["param"]["speedForScan"].asInt();
+			}
 			if (jsonValue_msg["param"].isMember("speedForCheck"))
 			{
 				fd.speedForCheck = jsonValue_msg["param"]["speedForCheck"].asInt();
@@ -2360,6 +2667,14 @@ void MQTT_FAN()
 			if (jsonValue_msg["param"].isMember("speedForWork"))
 			{
 				fd.speedForWork = jsonValue_msg["param"]["speedForWork"].asInt();
+			}
+			if (jsonValue_msg["param"].isMember("flightAlt"))
+			{
+				fd.flightAlt = jsonValue_msg["param"]["flightAlt"].asInt();
+			}
+			if (jsonValue_msg["param"].isMember("returnAlt"))
+			{
+				fd.returnAlt = jsonValue_msg["param"]["returnAlt"].asInt();
 			}
 			if (jsonValue_msg["param"].isMember("substationName"))
 			{
@@ -2376,8 +2691,12 @@ void MQTT_FAN()
 
 			//fd.distanceForWork = 15;
 			fanStep = 0;
+			// returnCode = DjiWaypointV2_Deinit();
+			// returnCode = DjiWaypointV2_Init();
+			// TODO: why re init here? ignore DjiWaypointV2_RegisterMissionEventCallback?
 
-			TaskFan();
+			TaskFanScan();
+			is_fan_task_valid = true;
 		}
 		break;
 	
