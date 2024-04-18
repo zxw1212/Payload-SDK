@@ -68,11 +68,10 @@ void* ForwardStatusMqtt_Task(void* arg) {
   T_DjiFcSubscriptionCompass compass;  // 22 磁罗盘是否异常
   // 23 卫星数
   T_DjiFcSubscriptionMotorStartError areMotorsOn;  // 24 电机是否启动
-  // T_DjiFcSubscriptionAvoidData avoidData; // TODO{zengxw} is this para need?
+  // T_DjiFcSubscriptionAvoidData avoidData;
   T_DjiFcSubscriptionFlightAnomaly flyAnomaly;  // 25 异常返回值
   T_DjiFcSubscriptionHeightFusion
-      ultrasonicHeight;  // 26 超声波高度返回 // TODO{zengxw} same to
-                         // relativeAltitude?
+      ultrasonicHeight;  // 26 超声波高度返回
   // 27 是否正在推流
   // 28 推流信息
 
@@ -85,8 +84,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
   T_DjiFcSubscriptionRTKConnectStatus rtk_connect_status;
 
   T_DjiFcSubscriptionGimbalAngles gimbalAngles;
-  // T_DjiFcSubscriptionThreeGimbalData threeGimbaData; // TODO{zengxw} is this
-  // param need?
+  // T_DjiFcSubscriptionThreeGimbalData threeGimbaData;
 
   double initYaw = 361.0;
   double mag = 0.0;
@@ -125,9 +123,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
 
       altitudeFused = DjiUser_FlightControlGetValueOfAltitudeFused();
       relativeAltitude =
-          DjiUser_FlightControlGetValueOfHeightFused();  // TODO{zengxw} make
-                                                         // sure what is this
-                                                         // param's purpose.
+          DjiUser_FlightControlGetValueOfHeightFused();
       flightStatus = DjiUser_FlightControlGetValueOfFlightStatus();
       velocity = DjiUser_FlightControlGetValueOfVelocity();
       positionFused = DjiUser_FlightControlGetValueOfPositionFused();
@@ -139,9 +135,7 @@ void* ForwardStatusMqtt_Task(void* arg) {
       areMotorsOn = DjiUser_FlightControlGetValueOfMotorStatusError();
       flyAnomaly = DjiUser_FlightControlGetValueOfFlightAnomaly();
       ultrasonicHeight =
-          DjiUser_FlightControlGetValueOfHeightFused();  // TODO{zengxw} the
-                                                         // same to
-                                                         // relativeAltitude??
+          DjiUser_FlightControlGetValueOfHeightFused();
 
       rc = DjiUser_FlightControlGetValueOfRC();
 
@@ -265,7 +259,6 @@ void* ForwardStatusMqtt_Task(void* arg) {
       if (countSecond++ % 2 == 0) {
         singleBatteryInfo1 = DjiUser_FlightControlGetValueOfBattery1();
         singleBatteryInfo2 = DjiUser_FlightControlGetValueOfBattery2();
-        // TODO{zengxw} is singleBatteryInfo2 not need?
         jv_battery["aircraftBatteryChargeInPercent"] =
             singleBatteryInfo1.batteryCapacityPercent;
         jv_battery["aircraftBatteryCurrentConsumption"] =

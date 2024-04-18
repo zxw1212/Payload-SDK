@@ -1,20 +1,20 @@
 #include <stdio.h>
-#include <iostream>
+
+#include <chrono>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
-#include <chrono>
-
-#include <json/json.h>
-#include "mqtt/async_client.h"
-#include "mqtt/topic.h"
 
 #include "application.hpp"
+#include "consume_command_mqtt.h"
 #include "dji_logger.h"
 #include "dji_platform.h"
 #include "forward_status_mqtt.h"
-#include "consume_command_mqtt.h"
+#include "mqtt/async_client.h"
+#include "mqtt/topic.h"
 #include "subscribe_helper.h"
+#include <json/json.h>
 
 namespace {
 #define EnableMQTT
@@ -43,16 +43,17 @@ bool bool_RTMPFlag;
 bool kSubscriptionStart = false;
 
 // psdk handler
+T_DjiTaskHandle s_rpiRtmpThread;
 T_DjiTaskHandle s_flightInitTaskHandle;
 T_DjiTaskHandle s_flightStatusForwardTaskHandle;
 T_DjiTaskHandle s_consumeUserCommandTaskHandle;
 
+#define RPI_RTMP_TASK_STACK_SIZE 2048
 #define DJI_TEST_FLIGHT_INIT_TASK_STACK_SIZE 2048
 #define DJI_TEST_FLIGHT_STATUS_FORWARD_TASK_STACK_SIZE 2048
 #define DJI_TEST_CONSUME_USER_COMMAND_TASK_STACK_SIZE 2048
 
 int main(int argc, char** argv) {
-
 #ifdef EnableMQTT
   // setup param of MQTT
   system("pwd");
@@ -106,7 +107,8 @@ int main(int argc, char** argv) {
                       .password("Ycjc@dky1409")
                       .clean_session()
                       .will(willMsg)
-                      .automatic_reconnect(std::chrono::seconds(1), std::chrono::seconds(10))
+                      .automatic_reconnect(std::chrono::seconds(1),
+                                           std::chrono::seconds(10))
                       .finalize();
   auto topic_callback = mqtt::topic(*cli, s_TOPIC_CB, kQOS);
   topic_cb = &topic_callback;
@@ -124,6 +126,23 @@ int main(int argc, char** argv) {
     cli->subscribe(s_TOPIC_V3, kQOS)->wait();
     cli->subscribe(s_TOPIC_FAN, kQOS)->wait();
   }
+
+  // // add to timer to check connection every 10 seconds
+  // mqtt::timer ping_timer(*cli);
+  // ping_timer.set_interval(seconds(10));
+
+  // ping_timer.set_callback([&client]() {
+  //   if (!cli->is_connected()) {
+  //     cout << "*** Connection Lost ***" << endl;
+  //     try {
+  //       cli->reconnect();
+  //     } catch (const mqtt::exception& exc) {
+  //       cerr << "Reconnect failed: " << exc.what() << endl;
+  //     }
+  //   }
+  // });
+  // ping_timer.start();
+
 #endif
 
   Application application(argc, argv);
@@ -150,6 +169,17 @@ int main(int argc, char** argv) {
   kSubscriptionStart = true;
   osalHandler->TaskSleepMs(5000);
 
+  // modeFly = "STANDBY";
+  // // Todo{zengxw} start dji liveview thread task.
+  // bool_RTMPFlag = root["RTMPFlag"].asBool();
+  // returnCode =
+  //     osalHandler->TaskCreate("MyRtmp_Task", MyRtmp_Task,
+  //                             RPI_RTMP_TASK_STACK_SIZE, NULL, &s_rpiRtmpThread);
+  // if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
+  //   USER_LOG_ERROR("MyRtmp_Task failed, errno = 0x%08llX", returnCode);
+  //   goto Deinit;
+  // }
+
   // start a thread to forwarding pub the topics via MQTT
   returnCode =
       osalHandler->TaskCreate("status_forward_task", ForwardStatusMqtt_Task,
@@ -173,7 +203,7 @@ int main(int argc, char** argv) {
                    returnCode);
     goto Deinit;
   }
-  
+
   // keep running
   USER_LOG_INFO("App keep running....\n");
   while (1) {

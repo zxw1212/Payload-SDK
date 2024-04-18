@@ -809,7 +809,7 @@ std::string displayModeToString(const int displayMode) {
       displayModeStr = "GO_HOME";
       break;
     case DJI_FC_SUBSCRIPTION_DISPLAY_MODE_NAVI_SDK_CTRL:
-      displayModeStr = "JOYSTICK";  // TODO{zengxw} ??SDK means joystick?
+      displayModeStr = "JOYSTICK";
       break;
     default:
       displayModeStr = "UNKNOWN";

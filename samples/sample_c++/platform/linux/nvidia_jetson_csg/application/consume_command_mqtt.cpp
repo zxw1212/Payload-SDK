@@ -1499,8 +1499,6 @@ std::vector<T_DJIWaypointV2Action> generateWaypointActions3(MissionTask missonTa
 			}
 		}
 
-
-		// TODO{zengxw} For what? since the next loop starts with an isStartFlying=0 action.
 		trigger.actionTriggerType = E_DJIWaypointV2ActionTriggerType::DJI_WAYPOINT_V2_ACTION_TRIGGER_ACTION_ASSOCIATED;
 		trigger.associateTriggerParam.actionAssociatedType = E_DJIWaypointV2TriggerAssociatedTimingType::DJI_WAYPOINT_V2_TRIGGER_ASSOCIATED_TIMING_TYPE_AFTER_FINISHED;
 		trigger.associateTriggerParam.actionIdAssociated = actionId - 1;
@@ -1812,7 +1810,6 @@ void MQTT_Mission()
 				returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 				if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 					USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
-					// TODO{zengxw} Error handle.
 				}
 				osalHandler->TaskSleepMs(1000);
 
@@ -1976,6 +1973,17 @@ void MQTT_Mission()
 	}
 }
 
+void TransformMissionWayPoint(Json::Value& item, double latitude_offset,
+									 double longitude_offset double altitude_offset){
+	if(item.isMember("wayPointLatitude") && item.isMember("wayPointLongitude") && item.isMember("wayPointAltitude")){
+		item["wayPointLatitude"] += latitude_offset;
+		item["wayPointLongitude"] += longitude_offset;
+		item["wayPointAltitude"] += altitude_offset;
+	} else {
+		std::cout << "json value key error!" << std::endl;
+	}
+}
+
 bool TaskFanScan()
 {
 	T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
@@ -2092,7 +2100,6 @@ bool TaskFanScan()
 	returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 	if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 		USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
-		// TODO{zengxw} Error handle.
 	}
 	osalHandler->TaskSleepMs(1000);
 
@@ -2112,6 +2119,8 @@ bool TaskFanScan()
 		item["wayPointAction"] = missonTasks[i].wayPointAction;
 		item["wayPointActionParam"] = missonTasks[i].wayPointActionParam;
 
+		// TODO: Change from ralative pose to absolute pose
+		// TransformMissionWayPoint(item, 0.0, 0.0, 0.0);
 		jsonValue_param["mission"].append(item);
 	}
 
@@ -2166,7 +2175,25 @@ bool TaskFanCheck(const std::string& fileName)
 		}
 		std::cout << "path " << filePath << std::endl;
 
+		// TODO HANDLE CHECK？
 		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+		// TODO Add resend code
+		/*
+		{
+		resend:
+			SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+			while(time_elapsed < 30s){
+				time_elapsed +;
+				call handle check response;
+				if(response == ok) break;
+				// todo: handle the case of response == ng.
+			}
+			if(time_elapsed >= 30){
+				std::cout << "send file failed whin 30s, resend now..."
+				goto resend;
+			}
+		}
+		*/
 
 		fs.download = 1;
 		fs.downloadFail = 0;
@@ -2489,7 +2516,6 @@ bool TaskFanWork(const std::string& fileName)
 		returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 			USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
-			// TODO{zengxw} Error handle.
 		}
 		osalHandler->TaskSleepMs(1000);
 
@@ -3361,7 +3387,7 @@ void MQTT_Camera()
 			rotation.yaw = yaw;
 			rotation.rotationMode = E_DjiGimbalRotationMode::DJI_GIMBAL_ROTATION_MODE_ABSOLUTE_ANGLE;
 			rotation.time = 0.5;
-			// TODO{zengxw} use base_info.mountPosition instead of hard code here.
+			// TODO{zengxw} use base_info.mountPosition instead of hard code here?
 			returnCode = DjiGimbalManager_Rotate(E_DjiMountPosition::DJI_MOUNT_POSITION_PAYLOAD_PORT_NO1, rotation);
             if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
                 jsonValue_cb["code"] = callback_unknown_error;
@@ -4495,7 +4521,7 @@ void MQTT_Gen()
 		{
 			if (jsonValue_msg.isMember("firmwareType"))
 			{
-				jsonValue_param["version"] = "PSDK V3.8"; // TODO{zengxw} what?
+				jsonValue_param["version"] = "PSDK V3.8";
 				jsonValue_param["firmwareType"] = jsonValue_msg["firmwareType"].asInt();
 			}
 
