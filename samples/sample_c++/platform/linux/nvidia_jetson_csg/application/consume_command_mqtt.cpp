@@ -1598,34 +1598,6 @@ void MQTT_Mission()
 		return;
 	}
 
-	// hardcode test
-	jsonValue_msg["param"]["mission"].resize(3);
-	jsonValue_msg["param"]["mission"][0]["wayPointAction"] = "4"; //yaw
-	jsonValue_msg["param"]["mission"][0]["wayPointActionParam"] = "0.0"; // yaw angle
-	jsonValue_msg["param"]["mission"][0]["shootPhotoDistanceInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][0]["shootPhotoTimeInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][0]["wayPointSpeed"] = 4.0;
-	jsonValue_msg["param"]["mission"][0]["wayPointAltitude"] = 10.0;
-	jsonValue_msg["param"]["mission"][0]["wayPointLongitude"] = 113.0;
-	jsonValue_msg["param"]["mission"][0]["wayPointLatitude"] = 23.0;
-	jsonValue_msg["param"]["mission"][1]["wayPointAction"] = "4"; //yaw
-	jsonValue_msg["param"]["mission"][1]["wayPointActionParam"] = "0.0"; // yaw angle
-	jsonValue_msg["param"]["mission"][1]["shootPhotoDistanceInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][1]["shootPhotoTimeInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][1]["wayPointSpeed"] = 4.0;
-	jsonValue_msg["param"]["mission"][1]["wayPointAltitude"] = 5.0;
-	jsonValue_msg["param"]["mission"][1]["wayPointLongitude"] = 113.0;
-	jsonValue_msg["param"]["mission"][1]["wayPointLatitude"] = 23.0;
-	jsonValue_msg["param"]["mission"][2]["wayPointAction"] = "4"; //yaw
-	jsonValue_msg["param"]["mission"][2]["wayPointActionParam"] = "0.0"; // yaw angle
-	jsonValue_msg["param"]["mission"][2]["shootPhotoDistanceInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][2]["shootPhotoTimeInterval"] = 0.0;
-	jsonValue_msg["param"]["mission"][2]["wayPointSpeed"] = 4.0;
-	jsonValue_msg["param"]["mission"][2]["wayPointAltitude"] = 10.0;
-	jsonValue_msg["param"]["mission"][2]["wayPointLongitude"] = 113.0;
-	jsonValue_msg["param"]["mission"][2]["wayPointLatitude"] = 23.0;
-	jsonValue_msg["param"]["missionID"] = "1000";
-
 	printf("MQTT_Mission\r\n");
 	switch (iCode)
 	{
@@ -1974,11 +1946,11 @@ void MQTT_Mission()
 }
 
 void TransformMissionWayPoint(Json::Value& item, double latitude_offset,
-									 double longitude_offset double altitude_offset){
+									 double longitude_offset, double altitude_offset){
 	if(item.isMember("wayPointLatitude") && item.isMember("wayPointLongitude") && item.isMember("wayPointAltitude")){
-		item["wayPointLatitude"] += latitude_offset;
-		item["wayPointLongitude"] += longitude_offset;
-		item["wayPointAltitude"] += altitude_offset;
+		item["wayPointLatitude"] = item["wayPointLatitude"].asDouble() + latitude_offset;
+		item["wayPointLongitude"] = item["wayPointLongitude"].asDouble() + longitude_offset;
+		item["wayPointAltitude"] = item["wayPointAltitude"].asDouble() + altitude_offset;
 	} else {
 		std::cout << "json value key error!" << std::endl;
 	}
@@ -2878,15 +2850,11 @@ void MQTT_RC()
 		}
 		else
 		{
-			// if (jsonValue_msg.isMember("param") &&
-			// 	jsonValue_msg["param"].isMember("mode") &&
-			// 	jsonValue_msg["param"]["mode"].isInt())
-			if(1)
+			if (jsonValue_msg.isMember("param") &&
+				jsonValue_msg["param"].isMember("mode") &&
+				jsonValue_msg["param"]["mode"].isInt())
 			{
-				// iParam = jsonValue_msg["param"]["mode"].asInt();
-				
-				// hardcode test
-				iParam = 0;
+				iParam = jsonValue_msg["param"]["mode"].asInt();
 				if (iParam == 1)
 				{
 					returnCode = osalHandler->TaskCreate(
