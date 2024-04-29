@@ -33,9 +33,7 @@
 
 #include "windsp.h"
 
-/**
- * @brief search "msg" "temporary comment" and "publish" "pa".
- */
+bool user_confirm_start_mission = false;
 
 // task handler
 T_DjiTaskHandle s_myGoHomeThread;
@@ -674,7 +672,7 @@ void UpdateStatus(std::string pCode)
 
 void executeCMD(const char* cmd /*shell command*/, char* result)
 {
-	printf("executeCMD %s\r\n", result);
+	USER_LOG_INFO("execute CMD in shell: %s", cmd);
 
 	char buf_ps[CMD_REC_LEN];
 	char ps[CMD_SEND_LEN] = { 0 };
@@ -695,9 +693,11 @@ void executeCMD(const char* cmd /*shell command*/, char* result)
 	{
 		printf("popen %s error\n", ps);
 	}
+
+	USER_LOG_INFO("execute CMD in shell result: %s", result);
 }
 
-int SendFile(const std::string& execMissionID, 
+std::string SendFile(const std::string& execMissionID, 
 			 int waypointIndex,
 			 double latitude,
 			 double longitude,
@@ -711,17 +711,15 @@ int SendFile(const std::string& execMissionID,
 	memset(bufSend, 0, CMD_SEND_LEN);
 	memset(bufRec, 0, CMD_REC_LEN);
 
-	printf("sendfile\r\n");
+	USER_LOG_INFO("Sending file using hyPost");
 
 	// execute hyPost in shell
 	sprintf(bufSend, "/home/rer/mybin/bin/hyPost %s %d %lf %lf %lf %lf %d %s %s 2>&1",
 		execMissionID.c_str(), waypointIndex, latitude, longitude, altitude, height, mediaType, filePath.c_str(),urls.c_str());
-
-	printf("%s\r\n", bufSend);
-
 	executeCMD(bufSend, bufRec);
-	std::cout << bufRec << std::endl;
-	return 1;
+	
+	std::string result{bufRec};
+	return result;
 }
 
 void* MySendFile_Task(void* arg)
@@ -831,7 +829,7 @@ void* MySendFile_Task(void* arg)
 		}
 		for (int i = 0; i < fileNum; i++)
 		{
-			int choosen_file_index = mediaFileListSize - 1 - i * 2;
+			int choosen_file_index = mediaFileListSize - 1 - i * 3;
 			if(choosen_file_index < 0) {
 				USER_LOG_ERROR("Invalid download file index!\n");
 				return NULL;
@@ -849,10 +847,9 @@ void* MySendFile_Task(void* arg)
 			// download choosen file
 			{
 			redownload:
-				if (choosen_file_index != s_nextDownloadFileIndex) {
-					choosen_file_index = s_nextDownloadFileIndex;
-				}
-
+				// if (choosen_file_index != s_nextDownloadFileIndex) {
+				// 	choosen_file_index = s_nextDownloadFileIndex;
+				// }
 				returnCode = DjiCameraManager_DownloadFileByIndex(E_DjiMountPosition::DJI_MOUNT_POSITION_PAYLOAD_PORT_NO1, s_meidaFileList.fileListInfo[choosen_file_index].fileIndex);
 				if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 					USER_LOG_ERROR("Download media file by index failed, error code: 0x%08X.", returnCode);
@@ -874,7 +871,7 @@ void* MySendFile_Task(void* arg)
 
 			// copy the download file to user defined path
 			std::string copyCommand = "cp " + last_path_N_file_name + " " + lastPathNFilename;
-			std::cout << "copying download..." << std::endl;
+			std::cout << "copying download...\n" << copyCommand << std::endl;
 			int result = std::system(copyCommand.c_str());
 			if (result != 0) {
 				std::cout << "文件拷贝失败！" << std::endl;
@@ -901,7 +898,7 @@ void* MySendFile_Task(void* arg)
 		{
 			if (i_Mode == 0)
 			{
-				is_success = TaskFanCheck("/task/test_check.jpg");
+				is_success = TaskFanCheck("/home/rer/mybin/bin/test_check.jpg");
 			}
 			else
 			{
@@ -910,12 +907,13 @@ void* MySendFile_Task(void* arg)
 			if(!is_success) {
 				is_fan_task_valid = false;
 			}
+			USER_LOG_INFO("TaskFanCheck finished, waiting for next step: confirm start mission.");
 		}
 		else if (fanStep == 2)
 		{
 			if (i_Mode == 0)
 			{
-				is_success = TaskFanWork("/task/test_work.jpg");
+				is_success = TaskFanWork("/home/rer/mybin/bin/test_work.jpg");
 			}
 			else
 			{
@@ -924,6 +922,7 @@ void* MySendFile_Task(void* arg)
 			if(!is_success) {
 				is_fan_task_valid = false;
 			}
+			USER_LOG_INFO("TaskFanWork finished, waiting for next step: confirm start mission.");
 		}
 		else if (fanStep == 3)
 		{
@@ -935,8 +934,6 @@ void* MySendFile_Task(void* arg)
 			char bufRec[CMD_REC_LEN];
 			memset(bufSend, 0, CMD_SEND_LEN);
 			memset(bufRec, 0, CMD_REC_LEN);
-
-			printf("sendfile\r\n");
 
 			DIR* dir;
 			struct dirent* ent;
@@ -963,9 +960,19 @@ void* MySendFile_Task(void* arg)
 			});
 			int photoIndex = 1;
 			int photo_count = photo_filenames.size();
+			USER_LOG_INFO("Send file after TaskFanWork:");
 			for(int i = 0; i < photo_filenames.size() - 2; i++) {
-				SendFile(jv_waypoint["execMissionID"].asString(), i + 1, 20.607123, 110.221142, 80.25, 50.21, 0, photo_filenames[i], uploadUrl);
+				std::cout << photo_filenames[i] << std::endl;
+				auto result = SendFile(jv_waypoint["execMissionID"].asString(), i + 1, 20.607123, 110.221142, 80.25, 50.21, 0, photo_filenames[i], uploadUrl);
+				std::size_t success = result.rfind(":true");
+				while (success == std::string::npos) {
+					USER_LOG_ERROR("Send file failed, resend now!");
+					result = SendFile(jv_waypoint["execMissionID"].asString(), i + 1, 20.607123, 110.221142, 80.25, 50.21, 0, photo_filenames[i], uploadUrl);
+					success = result.rfind(":true");
+				}
 			}
+
+			USER_LOG_INFO("Send file after TaskFanWork finished.");
 		}
 	}
 }
@@ -1125,10 +1132,10 @@ T_DjiReturnCode DjiTest_WaypointV2StateCallback(T_DjiWaypointV2MissionStatePush 
     osalHandler->GetTimeMs(&curMs);
     if (curMs - preMs >= 1000) {
         preMs = curMs;
-        USER_LOG_INFO("[Waypoint Index:%d]: State: %s, velocity:%.2f m/s",
-                      stateData.curWaypointIndex,
-                      s_waypointV2StateStr[DjiTest_WaypointV2GetMissionStateIndex(stateData.state)].stateStr,
-                      (dji_f32_t) stateData.velocity / 100);
+        // USER_LOG_INFO("[Waypoint Index:%d]: State: %s, velocity:%.2f m/s",
+        //               stateData.curWaypointIndex,
+        //               s_waypointV2StateStr[DjiTest_WaypointV2GetMissionStateIndex(stateData.state)].stateStr,
+        //               (dji_f32_t) stateData.velocity / 100);
     }
 
     return DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS;
@@ -1188,10 +1195,12 @@ void* ConsumeUserCommand_Task(void* arg)
 
 			jsonValue_cb.clear();
 			jsonValue_cb["date"] = (int)now_t;
-
+			USER_LOG_WARN("Waiting for mqtt msg in ConsumeUserCommand_Task while loop...");
 			auto msg = cli->consume_message();
+			USER_LOG_WARN("Got mqtt msg in ConsumeUserCommand_Task while loop");
 			if (!msg)
 			{
+				USER_LOG_ERROR("Invalid msg");
 				break;
 			}
 			if (!(reader.parse(msg->to_string(), jsonValue_msg)))
@@ -1312,6 +1321,7 @@ std::vector<std::string> splitWithStl(const std::string& str, const std::string&
 // print WaypointV2 actionId and action details
 void printActionDetails(T_DJIWaypointV2Action val)
 {
+	std::cout << "printActionDetails: " << std::endl;
 	std::cout.precision(15);
 
 	std::cout << " actionId " << val.actionId;
@@ -1783,6 +1793,8 @@ void MQTT_Mission()
 				if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 					USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
 				}
+				USER_LOG_INFO("MQTT_Mission: upload mission success");
+				user_confirm_start_mission = false;
 				osalHandler->TaskSleepMs(1000);
 
 				jv_waypoint["execMissionID"] = std::to_string(rand());
@@ -1819,6 +1831,7 @@ void MQTT_Mission()
 	case 10004:
 		break;
 	case 10006: // MISSION START
+		user_confirm_start_mission = true;
 		if(!is_fan_task_valid) {
 			modeFly = "STANDBY";
 			UpdateStatus("00003");
@@ -2050,29 +2063,35 @@ bool TaskFanScan()
 	}
 	
 	const auto mission_vec = generatePolygonWaypoints3(missonTasks, scan_vaild_num);
-	T_DjiWaypointV2 missions[scan_vaild_num];
-	for (size_t i = 0; i < scan_vaild_num; i++) {
+	const int mission_length = mission_vec.size();
+	T_DjiWaypointV2 *missions = NULL;
+	missions = static_cast<T_DjiWaypointV2*>(osalHandler->Malloc(mission_length * sizeof(T_DjiWaypointV2)));
+	for (size_t i = 0; i < mission_length; i++) {
 		missions[i] = mission_vec[i];
 	}
 	missionInitSettings.mission = missions;
-	missionInitSettings.missTotalLen = scan_vaild_num;
+	missionInitSettings.missTotalLen = mission_length;
 
 	for_each(mission_vec.begin(), mission_vec.end(), printLocation);
 
 	const auto action_vec = generateWaypointActions3(missonTasks, scan_vaild_num);
-	T_DJIWaypointV2Action actions[scan_vaild_num];
-	for (size_t i = 0; i < scan_vaild_num; i++) {
+	const int action_length = action_vec.size();
+	T_DJIWaypointV2Action *actions = NULL;
+	actions = static_cast<T_DJIWaypointV2Action*>(osalHandler->Malloc(action_length * sizeof(T_DJIWaypointV2Action)));
+	for (size_t i = 0; i < action_length; i++) {
 		actions[i] = action_vec[i];
 	}
 	T_DJIWaypointV2ActionList action_list;
 	action_list.actions = actions;
-	action_list.actionNum = scan_vaild_num;
+	action_list.actionNum = action_length;
 	missionInitSettings.actionList = action_list;
 	
 	returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 	if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 		USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
 	}
+	USER_LOG_INFO("TaskFanScan: upload mission success");
+	user_confirm_start_mission = false;
 	osalHandler->TaskSleepMs(1000);
 
 
@@ -2082,7 +2101,7 @@ bool TaskFanScan()
 
 	jsonValue_param["mission"].clear(); // start as all new mission
 	Json::Value item;
-	for (int i = 0; i < scan_vaild_num; i++)
+	for (int i = 0; i < 2; i++)
 	{
 		item["wayPointLatitude"] = missonTasks[i].wayPointLatitude;
 		item["wayPointLongitude"] = missonTasks[i].wayPointLongitude;
@@ -2102,7 +2121,7 @@ bool TaskFanScan()
 	jsonValue_cb["msg"] = "success";
 	jsonValue_cb["code"] = callback_success_code;
 
-	std::cout << jsonValue_cb.toStyledString() << std::endl;
+	std::cout << "jsonValue_cb in TaskFanScan:\n" << jsonValue_cb.toStyledString() << std::endl;
 
 
 	jv_waypoint["execMissionID"] = std::to_string(rand());
@@ -2120,6 +2139,8 @@ bool TaskFanScan()
 
 bool TaskFanCheck(const std::string& fileName)
 {
+	T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
+
 	struct ParametersWind pa;
 
 	char bufSend[CMD_SEND_LEN];
@@ -2127,13 +2148,11 @@ bool TaskFanCheck(const std::string& fileName)
 	memset(bufSend, 0, CMD_SEND_LEN);
 	memset(bufRec, 0, CMD_REC_LEN);
 	sprintf(bufSend, "python3 /home/rer/mybin/bin/windPost.py 1 %s 2>&1", fileName.c_str());  // [python windPost.py algo_type image_path]  偏航角算法algo_type=1
-	printf("%s\r\n", bufSend);
-
 	executeCMD(bufSend, bufRec);
-	std::cout << bufRec << std::endl;
 
 	Json::Reader reader;
 	Json::Value root;
+	std::string filePath;
 	if (!reader.parse(bufRec, root, false))
 	{
 		std::cout << "parse json file error!" << std::endl;
@@ -2141,31 +2160,20 @@ bool TaskFanCheck(const std::string& fileName)
 
 	if (root.isMember("path"))
 	{
-		std::string filePath = root["path"].asString();
+		filePath = root["path"].asString();
 		if(filePath.empty()) {
 			filePath = fileName; 
 		}
-		std::cout << "path " << filePath << std::endl;
 
-		// TODO HANDLE CHECK？
-		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
-		// TODO Add resend code
-		/*
-		{
-		resend:
-			SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
-			while(time_elapsed < 30s){
-				time_elapsed +;
-				call handle check response;
-				if(response == ok) break;
-				// todo: handle the case of response == ng.
-			}
-			if(time_elapsed >= 30){
-				std::cout << "send file failed whin 30s, resend now..."
-				goto resend;
-			}
+		// Send file and if the user checks ok, call 10006 to start mission.
+		USER_LOG_INFO("Send file in TaskFanCheck");
+		auto result = SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+		std::size_t success = result.rfind(":true");
+		while (success == std::string::npos) {
+			USER_LOG_ERROR("Send file failed, resend now!");
+			result = SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+			success = result.rfind(":true");
 		}
-		*/
 
 		fs.download = 1;
 		fs.downloadFail = 0;
@@ -2222,7 +2230,6 @@ bool TaskFanCheck(const std::string& fileName)
 		} else{
 			USER_LOG_INFO("Current global cruise speed is %f m/s", getGlobalCruiseSpeed);
 		}
-		T_DjiOsalHandler* osalHandler = DjiPlatform_GetOsalHandler();
 		osalHandler->TaskSleepMs(1000);
 
 		// TODO{zengxw} can not find psdk api like this
@@ -2266,28 +2273,34 @@ bool TaskFanCheck(const std::string& fileName)
 
 		printf("get lat %.14lf %.14lf\r\n", missonTasks[0].wayPointAltitude, missonTasks[0].wayPointLongitude);
 		const auto mission_vec = generatePolygonWaypoints3(missonTasks, check_vaild_num);
-		T_DjiWaypointV2 missions[check_vaild_num];
-		for (size_t i = 0; i < check_vaild_num; i++) {
+		const int mission_length = mission_vec.size();
+		T_DjiWaypointV2 *missions = NULL;
+		missions = static_cast<T_DjiWaypointV2*>(osalHandler->Malloc(mission_length * sizeof(T_DjiWaypointV2)));
+		for (size_t i = 0; i < mission_length; i++) {
 			missions[i] = mission_vec[i];
 		}
 		missionInitSettings.mission = missions;
-		missionInitSettings.missTotalLen = check_vaild_num;
+		missionInitSettings.missTotalLen = mission_length;
 
 		for_each(mission_vec.begin(), mission_vec.end(), printLocation);
 
 		const auto action_vec = generateWaypointActions3(missonTasks, check_vaild_num);
-		T_DJIWaypointV2Action actions[check_vaild_num];
-		for (size_t i = 0; i < check_vaild_num; i++) {
+		const int action_length = action_vec.size();
+		T_DJIWaypointV2Action *actions = NULL;
+		actions = static_cast<T_DJIWaypointV2Action*>(osalHandler->Malloc(action_length * sizeof(T_DJIWaypointV2Action)));
+		for (size_t i = 0; i < action_length; i++) {
 			actions[i] = action_vec[i];
 		}
 		T_DJIWaypointV2ActionList action_list;
 		action_list.actions = actions;
-		action_list.actionNum = check_vaild_num;
+		action_list.actionNum = action_length;
 		missionInitSettings.actionList = action_list;
 		returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 			USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
 		}
+		USER_LOG_INFO("TaskFanCheck: upload mission success");
+		user_confirm_start_mission = false;
 		osalHandler->TaskSleepMs(1000);
 
 		Json::Value item;
@@ -2331,8 +2344,22 @@ bool TaskFanCheck(const std::string& fileName)
 	}
 	
 		
-	std::cout << jsonValue_cb.toStyledString() << std::endl;
+	std::cout << "jsonValue_cb in TaskFanCheck:\n " << jsonValue_cb.toStyledString() << std::endl;
 	topic_cb->publish(jsonValue_cb.toStyledString());
+
+	// //add resend file logic
+	// time_t start_time = time(0);
+	// time_t end_time = time(0);
+	// while (!user_confirm_start_mission) {
+	// 	end_time = time(0);
+	// 	if(difftime(end_time, start_time) >= 10){
+	// 		USER_LOG_INFO("========10s elapsed after file sending in TaskFanCheck, Resend now ======");
+	// 		auto result = SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+	// 		start_time = time(0);
+	// 	}
+		
+	// 	osalHandler->TaskSleepMs(1000);
+	// }
 
 	return is_algo_res_true;
 }
@@ -2348,11 +2375,7 @@ bool TaskFanWork(const std::string& fileName)
 	memset(bufSend, 0, CMD_SEND_LEN);
 	memset(bufRec, 0, CMD_REC_LEN);
 	sprintf(bufSend, "python3 /home/rer/mybin/bin/windPost.py 2 %s 2>&1", fileName.c_str());
-	printf("%s\r\n", bufSend);
-
 	executeCMD(bufSend, bufRec);
-	std::cout << bufRec << std::endl;
-
 	Json::Reader reader;
 	Json::Value root;
 	if (!reader.parse(bufRec, root, false))
@@ -2366,9 +2389,14 @@ bool TaskFanWork(const std::string& fileName)
 		if(filePath.empty()) {
 			filePath = fileName; 
 		}
-		std::cout << "path " << filePath << std::endl;
-
-		SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+		USER_LOG_INFO("Send file in TaskFanWork");
+		auto result =  SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+		std::size_t success = result.rfind(":true");
+		while (success == std::string::npos) {
+			USER_LOG_ERROR("Send file failed, resend now!");
+			result = SendFile(jv_waypoint["execMissionID"].asString(), 0, 20.607123, 110.221142, 80.25, 50.21, 0, filePath, uploadUrl);
+			success = result.rfind(":true");
+		}
 		fs.download = 1;
 		fs.downloadFail = 0;
 		fs.upload = 1;
@@ -2434,7 +2462,6 @@ bool TaskFanWork(const std::string& fileName)
 		missionInitSettings.finishedAction = E_DJIWaypointV2MissionFinishedAction::DJI_WAYPOINT_V2_FINISHED_GO_HOME;
 		missionInitSettings.maxFlightSpeed = 10;
 		missionInitSettings.autoFlightSpeed = fd.speedForWork;
-
 		missionInitSettings.actionWhenRcLost = E_DJIWaypointV2MissionActionWhenRcLost::DJI_WAYPOINT_V2_MISSION_STOP_WAYPOINT_V2_AND_EXECUTE_RC_LOST_ACTION;
 		missionInitSettings.gotoFirstWaypointMode = E_DJIWaypointV2MissionGotoFirstWaypointMode::DJI_WAYPOINT_V2_MISSION_GO_TO_FIRST_WAYPOINT_MODE_POINT_TO_POINT;
 
@@ -2466,37 +2493,37 @@ bool TaskFanWork(const std::string& fileName)
 		printf("get lat %.14lf %.14lf\r\n", missonTasks[0].wayPointAltitude, missonTasks[0].wayPointLongitude);
 
 		const auto mission_vec = generatePolygonWaypoints3(missonTasks, work_vaild_num);
-		T_DjiWaypointV2 missions[work_vaild_num];
-		for (size_t i = 0; i < work_vaild_num; i++) {
+		const int mission_length = mission_vec.size();
+		T_DjiWaypointV2 *missions = NULL;
+		missions = static_cast<T_DjiWaypointV2*>(osalHandler->Malloc(mission_length * sizeof(T_DjiWaypointV2)));
+		for (size_t i = 0; i < mission_length; i++) {
 			missions[i] = mission_vec[i];
 		}
 		missionInitSettings.mission = missions;
-		missionInitSettings.missTotalLen = work_vaild_num;
+		missionInitSettings.missTotalLen = mission_length;
 
 		std::for_each(mission_vec.begin(), mission_vec.end(), printLocation);
 
 		const auto action_vec = generateWaypointActions3(missonTasks, work_vaild_num);
-		T_DJIWaypointV2Action actions[work_vaild_num];
-		for (size_t i = 0; i < work_vaild_num; i++) {
+		const int action_length = action_vec.size();
+		T_DJIWaypointV2Action *actions = NULL;
+		actions = static_cast<T_DJIWaypointV2Action*>(osalHandler->Malloc(action_length * sizeof(T_DJIWaypointV2Action)));
+		for (size_t i = 0; i < action_length; i++) {
 			actions[i] = action_vec[i];
 		}
 		T_DJIWaypointV2ActionList action_list;
 		action_list.actions = actions;
-		action_list.actionNum = work_vaild_num;
+		action_list.actionNum = action_length;
 		missionInitSettings.actionList = action_list;
 		
 		returnCode = DjiWaypointV2_UploadMission(&missionInitSettings);
 		if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
 			USER_LOG_ERROR("Init waypoint V2 mission setting failed, ErrorCode:0x%lX", returnCode);
 		}
+		USER_LOG_INFO("TaskFanWork: upload mission success");
+		user_confirm_start_mission = false;
 		osalHandler->TaskSleepMs(1000);
 
-		jsonValue_cb.clear();
-		jsonValue_cb["date"] = (int)now_t;
-
-		jsonValue_param["missionID"] = jv_waypoint["execMissionID"].asString();
-		jsonValue_param["missionTotal"] = 2;
-		jsonValue_param["missionCount"] = 2;
 		Json::Value item;
 		for (int i = 0; i < work_vaild_num; i++)
 		{
@@ -2536,7 +2563,7 @@ bool TaskFanWork(const std::string& fileName)
 		}
 	}
 		
-	std::cout << jsonValue_cb.toStyledString() << std::endl;
+	std::cout << "jsonValue_cb in TaskFanWork:\n " << jsonValue_cb.toStyledString() << std::endl;
 	topic_cb->publish(jsonValue_cb.toStyledString());
 
 	return is_algo_res_true;

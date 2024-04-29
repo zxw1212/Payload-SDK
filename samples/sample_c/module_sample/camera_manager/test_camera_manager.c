@@ -31,6 +31,7 @@
 #include "dji_platform.h"
 #include "dji_logger.h"
 #include "dji_mop_channel.h"
+#include <stdlib.h>
 
 /* Private constants ---------------------------------------------------------*/
 #define TEST_CAMERA_MANAGER_MEDIA_FILE_NAME_MAX_SIZE             256
@@ -2251,6 +2252,7 @@ static T_DjiReturnCode DjiTest_CameraManagerMediaDownloadAndDeleteMediaFile(E_Dj
 
         downloadCount =  s_meidaFileList.totalCount;
 
+        printf("start to download file\n ");
         for (int i = 0; i < downloadCount; ++i) {
         redownload:
             if (i != s_nextDownloadFileIndex) {
@@ -2264,12 +2266,16 @@ static T_DjiReturnCode DjiTest_CameraManagerMediaDownloadAndDeleteMediaFile(E_Dj
                 goto redownload;
             }
         }
+        system("pwd");
+        system("ls");
 
+        printf("start to delete downloaded file\n ");
         returnCode = DjiCameraManager_DeleteFileByIndex(position, s_meidaFileList.fileListInfo[0].fileIndex);
         if (returnCode != DJI_ERROR_SYSTEM_MODULE_CODE_SUCCESS) {
             USER_LOG_ERROR("Delete media file by index failed, error code: 0x%08X.", returnCode);
             return returnCode;
         }
+        system("ls");
 
         osalHandler->TaskSleepMs(1000);
     } else {

@@ -58,9 +58,9 @@ int main(int argc, char** argv) {
   // setup param of MQTT
   system("pwd");
   ifstream ifs;
-  ifs.open("/home/rer/mybin/bin/config.json");
+  ifs.open("/home/rer/mybin/bin/config93.json");
   if (!ifs.is_open()) {
-    std::cout << "open file /home/rer/mybin/bin/config.json error!"
+    std::cout << "open file /home/rer/mybin/bin/config93.json error!"
               << std::endl;
     return -1;
   }
@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
   kSubscriptionStart = true;
   osalHandler->TaskSleepMs(5000);
 
-  // modeFly = "STANDBY";
+  modeFly = "STANDBY";
   // // Todo{zengxw} start dji liveview thread task.
   // bool_RTMPFlag = root["RTMPFlag"].asBool();
   // returnCode =
